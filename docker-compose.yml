@@ -1,0 +1,12 @@
+version: "3.4"
+
+services:
+  database:
+    image: mongo:latest
+    command: [--auth]
+    ports:
+      - '2345:27017'
+    environment:
+      - MONGODB_PASSWORD=realllyHordPasward
+      - MONGODB_USER=mafia
+      - MONGODB_DATABASE=mafia
