@@ -41,6 +41,7 @@ type MafiaLogger struct {
 	IsEnabled bool
 }
 
+// Print message to the current output stream
 func (l *MafiaLogger) Log(logType string, message string) {
 	if l.IsEnabled == true {
 		if logFunc, ok := logsMap[logType]; ok {
