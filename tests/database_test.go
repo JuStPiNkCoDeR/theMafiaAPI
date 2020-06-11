@@ -1,12 +1,12 @@
-package database_test
+package tests_test
 
 import (
+	"../database"
+	"../logger"
 	"context"
 	"fmt"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"testing"
-	"theMafia/database"
-	"theMafia/logger"
 )
 
 var mafiaLogs = &logger.MafiaLogger{IsEnabled: false}

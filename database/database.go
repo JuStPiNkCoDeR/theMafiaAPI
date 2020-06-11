@@ -10,12 +10,13 @@
 package database
 
 import (
+	"../lib"
+	"../logger"
 	"context"
 	"encoding/json"
 	"fmt"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"theMafia/logger"
 )
 
 // Manager structure.
@@ -28,31 +29,23 @@ type Database struct {
 	collections     map[string]*mongo.Collection
 }
 
-// Database error
-type Error struct {
-	ParentError error                  // Error which has been thrown
-	Message     string                 // String contains short information about error
-	Context     context.Context        // Context of connection
-	Options     *options.ClientOptions // Options of connection
-}
-
 // Return complete error message
-func (e *Error) Error() string {
-	contextBytes, contextErr := json.Marshal(e.Context)
+func createErrorMessage(message string, context context.Context, options *options.ClientOptions) string {
+	contextBytes, contextErr := json.Marshal(context)
 	ctx := "Unknown"
 
 	if contextErr != nil {
 		ctx = string(contextBytes)
 	}
 
-	optionBytes, optionErr := json.Marshal(e.Options)
+	optionBytes, optionErr := json.Marshal(options)
 	opt := "Unknown"
 
 	if optionErr != nil {
 		opt = string(optionBytes)
 	}
 
-	return fmt.Sprintf("%s occurs for database connection with\nContext: %s\nOptions: %s", e.Message, ctx, opt)
+	return fmt.Sprintf("%s occurs for database connection with\nContext: %s\nOptions: %s", message, ctx, opt)
 }
 
 // Try to establish a connection to the database and save current Client.
@@ -99,10 +92,8 @@ func (d *Database) SelectDatabase(name string, options ...*options.DatabaseOptio
 // Add the collection to the map of current connection
 func (d *Database) AddCollection(name string, options ...*options.CollectionOptions) error {
 	if d.CurrentDatabase == nil {
-		return &Error{
-			Message: "You should select database first",
-			Context: d.Context,
-			Options: d.Options,
+		return &lib.StackError{
+			Message: createErrorMessage("You should select database first", d.Context, d.Options),
 		}
 	}
 
@@ -122,10 +113,8 @@ func (d *Database) GetCollection(name string) (collection *mongo.Collection, err
 	if collection, ok := d.collections[name]; ok {
 		return collection, nil
 	} else {
-		return collection, &Error{
-			Message: "Error: Can't get collection with name " + name,
-			Context: d.Context,
-			Options: d.Options,
+		return collection, &lib.StackError{
+			Message: createErrorMessage("Error: Can't get collection with name "+name, d.Context, d.Options),
 		}
 	}
 }
