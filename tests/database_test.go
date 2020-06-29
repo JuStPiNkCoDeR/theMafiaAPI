@@ -16,7 +16,7 @@ func TestDatabase_Connect(t *testing.T) {
 	err := testDB.Connect()
 
 	if err != nil {
-		t.Error("Got error on connection", err)
+		t.Fatal("Got error on connection", err)
 	}
 }
 
@@ -24,7 +24,7 @@ func TestDatabase_Ping(t *testing.T) {
 	err := testDB.Ping()
 
 	if err != nil {
-		t.Error("Got error on ping connection", err)
+		t.Fatal("Got error on ping connection", err)
 	}
 }
 
@@ -33,7 +33,7 @@ func TestDatabase_SelectDatabase(t *testing.T) {
 
 	var databaseName = testDB.CurrentDatabase.Name()
 	if databaseName != "mafia" {
-		t.Error("Got different database name\nExpected: mafia\nGot: ", databaseName)
+		t.Fatal("Got different database name\nExpected: mafia\nGot: ", databaseName)
 	}
 }
 
@@ -41,11 +41,11 @@ func TestDatabase_AddCollection(t *testing.T) {
 	err := testDB.AddCollection("test")
 
 	if err != nil {
-		t.Error("Something went wrong with adding collection", err)
+		t.Fatal("Something went wrong with adding collection", err)
 	}
 
 	if _, ok := testDB.GetCollection("test"); ok != nil {
-		t.Error("Cant't get collection with name 'test'", ok)
+		t.Fatal("Cant't get collection with name 'test'", ok)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestDatabase_Close(t *testing.T) {
 	err := testDB.Ping()
 
 	if err == nil {
-		t.Error("Connection has not been closed")
+		t.Fatal("Connection has not been closed")
 	}
 }
 
