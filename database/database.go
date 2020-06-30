@@ -30,7 +30,7 @@ type Database struct {
 }
 
 // Return complete error message
-func createErrorMessage(message string, context context.Context, options *options.ClientOptions) string {
+func createErrorMessage(context context.Context, message string, options *options.ClientOptions) string {
 	contextBytes, contextErr := json.Marshal(context)
 	ctx := "Unknown"
 
@@ -53,7 +53,10 @@ func (d *Database) Connect() error {
 	client, err := mongo.Connect(d.Context, d.Options)
 
 	if err != nil {
-		return err
+		return &lib.StackError{
+			ParentError: err,
+			Message:     createErrorMessage(d.Context, "Error on connecting to database", d.Options),
+		}
 	}
 
 	d.Client = client
@@ -93,7 +96,7 @@ func (d *Database) SelectDatabase(name string, options ...*options.DatabaseOptio
 func (d *Database) AddCollection(name string, options ...*options.CollectionOptions) error {
 	if d.CurrentDatabase == nil {
 		return &lib.StackError{
-			Message: createErrorMessage("You should select database first", d.Context, d.Options),
+			Message: createErrorMessage(d.Context, "You should select database first", d.Options),
 		}
 	}
 
@@ -112,9 +115,9 @@ func (d *Database) AddCollection(name string, options ...*options.CollectionOpti
 func (d *Database) GetCollection(name string) (collection *mongo.Collection, err error) {
 	if collection, ok := d.collections[name]; ok {
 		return collection, nil
-	} else {
-		return collection, &lib.StackError{
-			Message: createErrorMessage("Error: Can't get collection with name "+name, d.Context, d.Options),
-		}
+	}
+
+	return nil, &lib.StackError{
+		Message: createErrorMessage(d.Context, "Error: Can't get collection with name "+name, d.Options),
 	}
 }

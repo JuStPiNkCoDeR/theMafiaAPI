@@ -9,14 +9,15 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"hash"
 )
 
 // RSA data struct
 type RSA struct {
 	privateKey       *rsa.PrivateKey
-	OwnPublicKey     *rsa.PublicKey // Public key for current user
-	ForeignPublicKey *rsa.PublicKey // Public key for other user
+	OwnPublicKey     *rsa.PublicKey // Public key of current user
+	ForeignPublicKey *rsa.PublicKey // Public key of other user
 	Hash             hash.Hash      // Hash code
 	signHash         crypto.Hash
 	signatureOptions *rsa.PSSOptions
@@ -34,6 +35,7 @@ func (R *RSA) Init() (err error) {
 	R.OwnPublicKey = &R.privateKey.PublicKey
 	R.signatureOptions = &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto}
 	R.signHash = crypto.SHA256
+	R.Hash = sha256.New()
 
 	return nil
 }
@@ -51,15 +53,22 @@ func (R *RSA) Encode(message string, label string) (encrypted []byte, err error)
 			ParentError: err,
 			Message:     "An error occurred while encrypting message",
 		}
-	} else {
-		return
 	}
+	return
 }
 
 // Calculate hash for make/verify sign
-func (R *RSA) calculateHashPSS(encrypted []byte) (hash []byte) {
+func (R *RSA) calculateHashPSS(encrypted []byte) (hash []byte, err error) {
 	hashPSS := R.signHash.New()
-	hashPSS.Write(encrypted)
+	_, err = hashPSS.Write(encrypted)
+
+	if err != nil {
+		return nil, &lib.StackError{
+			ParentError: err,
+			Message:     "Error on calculating sign PSS hash",
+		}
+	}
+
 	hash = hashPSS.Sum(nil)
 
 	return
@@ -71,7 +80,14 @@ func (R *RSA) Sign(encrypted []byte) (signature []byte, err error) {
 		return nil, &lib.StackError{Message: "No encrypted string for signature"}
 	}
 
-	hashed := R.calculateHashPSS(encrypted)
+	hashed, err := R.calculateHashPSS(encrypted)
+
+	if err != nil {
+		return nil, &lib.StackError{
+			ParentError: err,
+			Message:     "Error on making signature",
+		}
+	}
 
 	signature, err = rsa.SignPSS(rand.Reader, R.privateKey, R.signHash, hashed, R.signatureOptions)
 
@@ -98,7 +114,14 @@ func (R *RSA) Decode(encrypted []byte, label []byte) (message string, err error)
 
 // Check if foreign public key is signs owner key
 func (R *RSA) VerifySign(sign []byte, encrypted []byte) (err error) {
-	hashed := R.calculateHashPSS(encrypted)
+	hashed, err := R.calculateHashPSS(encrypted)
+
+	if err != nil {
+		return &lib.StackError{
+			ParentError: err,
+			Message:     "Error on verifying of signature",
+		}
+	}
 
 	err = rsa.VerifyPSS(R.ForeignPublicKey, R.signHash, hashed, sign, R.signatureOptions)
 
