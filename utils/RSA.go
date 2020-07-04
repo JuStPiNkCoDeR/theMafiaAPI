@@ -15,24 +15,35 @@ import (
 
 // RSA data struct
 type RSA struct {
-	privateKey       *rsa.PrivateKey
-	OwnPublicKey     *rsa.PublicKey // Public key of current user
-	ForeignPublicKey *rsa.PublicKey // Public key of other user
-	Hash             hash.Hash      // Hash code
-	signHash         crypto.Hash
-	signatureOptions *rsa.PSSOptions
+	privateKeyOAEP       *rsa.PrivateKey
+	privateKeyPSS        *rsa.PrivateKey
+	OwnPublicKeyOAEP     *rsa.PublicKey // Public key of server for encryption
+	OwnPublicKeyPSS      *rsa.PublicKey // Public key of server for signature
+	ForeignPublicKeyOAEP *rsa.PublicKey // Public key of other user to encode data
+	ForeignPublicKeyPSS  *rsa.PublicKey // Public key of other user to make signature
+	Hash                 hash.Hash      // Hash code
+	signHash             crypto.Hash
+	signatureOptions     *rsa.PSSOptions
 }
 
 // Generate private, public keys and sign hash, options for current instance
 func (R *RSA) Init() (err error) {
-	if R.privateKey, err = rsa.GenerateKey(rand.Reader, 2048); err != nil {
+	if R.privateKeyOAEP, err = rsa.GenerateKey(rand.Reader, 2048); err != nil {
 		return &lib.StackError{
 			ParentError: err,
-			Message:     "An error occurred while generating keys",
+			Message:     "An error occurred while generating keys(OAEP)",
 		}
 	}
 
-	R.OwnPublicKey = &R.privateKey.PublicKey
+	if R.privateKeyPSS, err = rsa.GenerateKey(rand.Reader, 2048); err != nil {
+		return &lib.StackError{
+			ParentError: err,
+			Message:     "An error occurred while generating keys(PSS)",
+		}
+	}
+
+	R.OwnPublicKeyOAEP = &R.privateKeyOAEP.PublicKey
+	R.OwnPublicKeyPSS = &R.privateKeyPSS.PublicKey
 	R.signatureOptions = &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto}
 	R.signHash = crypto.SHA256
 	R.Hash = sha256.New()
@@ -42,11 +53,11 @@ func (R *RSA) Init() (err error) {
 
 // Encode message
 func (R *RSA) Encode(message string, label string) (encrypted []byte, err error) {
-	if R.ForeignPublicKey == nil {
-		return nil, &lib.StackError{Message: "Foreign public key is empty"}
+	if R.ForeignPublicKeyOAEP == nil {
+		return nil, &lib.StackError{Message: "Foreign public key(OAEP) is empty"}
 	}
 
-	encrypted, err = rsa.EncryptOAEP(R.Hash, rand.Reader, R.ForeignPublicKey, []byte(message), []byte(label))
+	encrypted, err = rsa.EncryptOAEP(R.Hash, rand.Reader, R.ForeignPublicKeyOAEP, []byte(message), []byte(label))
 
 	if err != nil {
 		return nil, &lib.StackError{
@@ -89,7 +100,7 @@ func (R *RSA) Sign(encrypted []byte) (signature []byte, err error) {
 		}
 	}
 
-	signature, err = rsa.SignPSS(rand.Reader, R.privateKey, R.signHash, hashed, R.signatureOptions)
+	signature, err = rsa.SignPSS(rand.Reader, R.privateKeyPSS, R.signHash, hashed, R.signatureOptions)
 
 	if err != nil {
 		return nil, &lib.StackError{ParentError: err, Message: "Error on making signature"}
@@ -101,7 +112,7 @@ func (R *RSA) Sign(encrypted []byte) (signature []byte, err error) {
 // Decode message encoded via algorithm above
 func (R *RSA) Decode(encrypted []byte, label []byte) (message string, err error) {
 	var bytes []byte
-	bytes, err = rsa.DecryptOAEP(R.Hash, rand.Reader, R.privateKey, encrypted, label)
+	bytes, err = rsa.DecryptOAEP(R.Hash, rand.Reader, R.privateKeyOAEP, encrypted, label)
 
 	if err != nil {
 		return "", &lib.StackError{ParentError: err, Message: "Error on decoding"}
@@ -114,6 +125,10 @@ func (R *RSA) Decode(encrypted []byte, label []byte) (message string, err error)
 
 // Check if foreign public key is signs owner key
 func (R *RSA) VerifySign(sign []byte, encrypted []byte) (err error) {
+	if R.ForeignPublicKeyPSS == nil {
+		return &lib.StackError{Message: "Foreign public key(PSS) is empty"}
+	}
+
 	hashed, err := R.calculateHashPSS(encrypted)
 
 	if err != nil {
@@ -123,7 +138,7 @@ func (R *RSA) VerifySign(sign []byte, encrypted []byte) (err error) {
 		}
 	}
 
-	err = rsa.VerifyPSS(R.ForeignPublicKey, R.signHash, hashed, sign, R.signatureOptions)
+	err = rsa.VerifyPSS(R.ForeignPublicKeyPSS, R.signHash, hashed, sign, R.signatureOptions)
 
 	if err != nil {
 		return &lib.StackError{ParentError: err, Message: "Error on verifying signature"}

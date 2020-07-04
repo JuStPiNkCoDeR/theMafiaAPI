@@ -7,7 +7,7 @@ package utils
 import (
 	"../lib"
 	"../logger"
-	"crypto/x509"
+	"encoding/asn1"
 	"encoding/json"
 	pem2 "encoding/pem"
 	"fmt"
@@ -17,29 +17,40 @@ import (
 var fmtLogger = &logger.MafiaLogger{IsEnabled: true}
 
 // Log functions
-func triggerSocketEvent(output logger.Logger, nsp string, eventName string, ID string) {
-	output.Log(logger.Debug, fmt.Sprintf("Triggered socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n", nsp, eventName, ID))
+func debugSocketEvent(outStream logger.Logger, data interface{}) {
+	dataJSON, err := json.Marshal(data)
+
+	if err != nil {
+		outStream.Log(logger.Error, fmt.Sprintf("Unable to serialize data for debug\nError:\n\t%s\n", err))
+		return
+	}
+
+	outStream.Log(logger.Debug, fmt.Sprintf("Debug socket event\nData:\n\t%s\n", string(dataJSON)))
 }
 
-func successfulSocketEvent(output logger.Logger, nsp string, eventName string, ID string) {
-	output.Log(logger.Debug, fmt.Sprintf("Socket event passed OK\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n", nsp, eventName, ID))
+func triggerSocketEvent(outStream logger.Logger, nsp string, eventName string, ID string) {
+	outStream.Log(logger.Debug, fmt.Sprintf("Triggered socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n", nsp, eventName, ID))
 }
 
-func errorSocketEvent(output logger.Logger, nsp string, eventName string, ID string, err error) {
-	output.Log(logger.Error, fmt.Sprintf("Error on socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n\tError:\n\t\t%s\n", nsp, eventName, ID, err.Error()))
+func successfulSocketEvent(outStream logger.Logger, nsp string, eventName string, ID string) {
+	outStream.Log(logger.Debug, fmt.Sprintf("Socket event passed OK\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n", nsp, eventName, ID))
 }
 
-type EventName string
+func errorSocketEvent(outStream logger.Logger, nsp string, eventName string, ID string, err error) {
+	outStream.Log(logger.Error, fmt.Sprintf("Error on socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n\tError:\n\t\t%s\n", nsp, eventName, ID, err.Error()))
+}
+
+type OutEventName string
 
 const (
-	rsaSendKey    EventName = "rsa:publicKey"
-	rsaGetOAEPKey EventName = "rsa:sendKeyOAEP"
+	rsaSendServerKeys   OutEventName = "rsa:serverKeys"
+	rsaAcceptClientKeys OutEventName = "rsa:acceptClientKeys"
 )
 
 // Socket response struct
 type Response struct {
-	Name EventName `json:"name"`
-	Data string    `json:"data"`
+	Name OutEventName `json:"name"`
+	Data string       `json:"data"`
 }
 
 // Socket that use RSA encryption
@@ -74,6 +85,13 @@ func (socket *SecureSocket) Init() error {
 				return
 			}
 
+			debugSocketEvent(fmtLogger, map[string]interface{}{
+				"Namespace":  "secure",
+				"Event name": "read",
+				"ID":         socket.Client.RemoteAddr().String(),
+				"Input":      message,
+			})
+
 			var incomingMessage interface{}
 
 			err = json.Unmarshal(message, &incomingMessage)
@@ -82,19 +100,28 @@ func (socket *SecureSocket) Init() error {
 				errorSocketEvent(fmtLogger, "secure", "unmarshal", socket.Client.RemoteAddr().String(), err)
 			}
 
+			debugSocketEvent(fmtLogger, map[string]interface{}{
+				"Namespace":  "secure",
+				"Event name": "unmarshal",
+				"ID":         socket.Client.RemoteAddr().String(),
+				"Input":      incomingMessage,
+			})
+
 			incomingMessageMap := incomingMessage.(map[string]interface{})
-			eventName := incomingMessageMap["name"].(EventName)
+			eventName := incomingMessageMap["name"]
 
 			switch eventName {
-			case "rsa:getKey":
+			case "rsa:getServerKeys":
 				triggerSocketEvent(fmtLogger, "secure", "getKey", socket.Client.RemoteAddr().String())
 
-				if err = socket.SendPublicKey(); err != nil {
+				if err = socket.SendPublicKeys(); err != nil {
 					errorSocketEvent(fmtLogger, "secure", "getKey", socket.Client.RemoteAddr().String(), err)
 					return
 				}
 
 				successfulSocketEvent(fmtLogger, "secure", "getKey", socket.Client.RemoteAddr().String())
+			case "rsa:setClientKeys":
+
 			}
 		}
 	}()
@@ -102,7 +129,7 @@ func (socket *SecureSocket) Init() error {
 	return nil
 }
 
-func (socket *SecureSocket) Send(eventName EventName, data interface{}) error {
+func (socket *SecureSocket) Send(eventName OutEventName, data interface{}) error {
 	jsonData, err := json.Marshal(data)
 
 	if err != nil {
@@ -139,7 +166,7 @@ func (socket *SecureSocket) Send(eventName EventName, data interface{}) error {
 }
 
 // Send encrypted single message
-func (socket *SecureSocket) SendEncryptedMessage(eventName EventName, data string) error {
+func (socket *SecureSocket) SendEncryptedMessage(eventName OutEventName, data string) error {
 	encrypted, err := socket.r.Encode(data, "")
 
 	if err == nil {
@@ -157,13 +184,53 @@ func (socket *SecureSocket) SendEncryptedMessage(eventName EventName, data strin
 }
 
 // Send RSA public key as JSON string
-func (socket *SecureSocket) SendPublicKey() error {
-	pem := pem2.EncodeToMemory(&pem2.Block{
+func (socket *SecureSocket) SendPublicKeys() error {
+	bytesOAEP, err := asn1.Marshal(*socket.r.OwnPublicKeyOAEP)
+
+	if err != nil {
+		return &lib.StackError{
+			ParentError: err,
+			Message:     "Error on ASN marshal for OAEP public key",
+		}
+	}
+
+	pemOAEP := pem2.EncodeToMemory(&pem2.Block{
 		Type:  "PUBLIC KEY",
-		Bytes: x509.MarshalPKCS1PublicKey(socket.r.OwnPublicKey),
+		Bytes: bytesOAEP,
 	})
 
-	err := socket.Send(rsaSendKey, string(pem))
+	if pemOAEP == nil {
+		return &lib.StackError{
+			Message: "Error on encoding public key(OAEP)",
+		}
+	}
+
+	bytesPSS, err := asn1.Marshal(*socket.r.OwnPublicKeyPSS)
+
+	if err != nil {
+		return &lib.StackError{
+			ParentError: err,
+			Message:     "Error on ASN marshal for PSS public key",
+		}
+	}
+
+	pemPSS := pem2.EncodeToMemory(&pem2.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: bytesPSS,
+	})
+
+	if pemPSS == nil {
+		return &lib.StackError{
+			Message: "Error on encoding public key(PSS)",
+		}
+	}
+
+	data := map[string]interface{}{
+		"OAEP": pemOAEP,
+		"PSS":  pemPSS,
+	}
+
+	err = socket.Send(rsaSendServerKeys, data)
 
 	if err != nil {
 		return &lib.StackError{

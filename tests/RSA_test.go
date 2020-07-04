@@ -21,8 +21,11 @@ func TestRSA_Init(t *testing.T) {
 		t.Error("Got error on Alisa RSA init", err)
 	}
 
-	Sasha.ForeignPublicKey = Alisa.OwnPublicKey
-	Alisa.ForeignPublicKey = Sasha.OwnPublicKey
+	Sasha.ForeignPublicKeyOAEP = Alisa.OwnPublicKeyOAEP
+	Sasha.ForeignPublicKeyPSS = Alisa.OwnPublicKeyPSS
+
+	Alisa.ForeignPublicKeyOAEP = Sasha.OwnPublicKeyOAEP
+	Alisa.ForeignPublicKeyPSS = Sasha.OwnPublicKeyPSS
 }
 
 func TestRSA_Encode(t *testing.T) {
@@ -57,7 +60,7 @@ func TestRSA_Sign(t *testing.T) {
 
 func TestRSA_Verify(t *testing.T) {
 	if err := Alisa.VerifySign(signature, secretText); err != nil {
-		t.Errorf("Got error on verifying signature\n%e", err)
+		t.Errorf("Got error on verifying signature\n%s", err)
 	} else {
 		t.Logf("Signature verified")
 	}

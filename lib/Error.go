@@ -18,7 +18,7 @@ func (e *StackError) Error() string {
 
 	fmt.Println(e.ParentError)
 	if e.ParentError != nil {
-		out += e.ParentError.Error() + "\n\n\t"
+		out += e.ParentError.Error() + "\n\t"
 	}
 
 	return out + e.Message
