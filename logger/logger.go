@@ -6,7 +6,6 @@ package logger
 
 import (
 	"fmt"
-	"log"
 )
 
 // Function to print message
@@ -58,11 +57,9 @@ type MafiaLogger struct {
 
 // Print message to the current output stream
 func (l *MafiaLogger) Log(logType LogType, message string) {
-	if l.IsEnabled == true {
+	if l.IsEnabled {
 		if logFunc, ok := logsMap[logType]; ok {
 			logFunc(message)
-		} else {
-			log.Fatal("Unknown log function")
 		}
 	}
 }
