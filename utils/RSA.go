@@ -10,6 +10,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/pem"
 	"hash"
 )
 
@@ -145,4 +147,36 @@ func (R *RSA) VerifySign(sign []byte, encrypted []byte) (err error) {
 	}
 
 	return nil
+}
+
+func (R *RSA) ImportKey(keyPEM string, isOAEP bool) error {
+	block, _ := pem.Decode([]byte(keyPEM))
+
+	if block == nil {
+		return &lib.StackError{Message: "Cannot decode PEM string"}
+	}
+
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
+
+	if err != nil {
+		return &lib.StackError{
+			ParentError: err,
+			Message:     "Cannot parse bytes of rsa key",
+		}
+	}
+
+	switch pub := key.(type) {
+	case *rsa.PublicKey:
+		if isOAEP {
+			R.ForeignPublicKeyOAEP = pub
+		} else {
+			R.ForeignPublicKeyPSS = pub
+		}
+
+		return nil
+	default:
+		return &lib.StackError{
+			Message: "The input PEM string didnt match rsa public key type",
+		}
+	}
 }

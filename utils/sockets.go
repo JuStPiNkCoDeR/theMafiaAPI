@@ -8,7 +8,7 @@ import (
 	"../lib"
 	"../logger"
 	"crypto/x509"
-	"encoding/asn1"
+	"encoding/base64"
 	"encoding/json"
 	pem "encoding/pem"
 	"fmt"
@@ -48,6 +48,108 @@ const (
 	rsaAcceptClientKeys OutEventName = "rsa:acceptClientKeys"
 )
 
+// Events
+func getServerKeys(nsp string, eventName string, socket *SecureSocket) {
+	triggerSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+
+	if err := socket.SendPublicKeys(); err != nil {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+		return
+	}
+
+	successfulSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+}
+
+func setClientsKeys(incomingMessageMap map[string]interface{}, nsp string, eventName string, socket *SecureSocket) {
+	triggerSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+
+	incomingData := incomingMessageMap["data"].(map[string]interface{})
+
+	// Parse OAEP PEM data
+	if pemOAEP, ok := incomingData["oaep"]; ok {
+		switch typedPEM := pemOAEP.(type) {
+		case string:
+			if err := socket.r.ImportKey(typedPEM, true); err != nil {
+				errorSocketEvent(
+					fmtLogger,
+					nsp,
+					eventName,
+					socket.ID,
+					&lib.StackError{
+						ParentError: err,
+						Message:     "Error on import OAEP key",
+					})
+
+				if err := socket.Send(rsaAcceptClientKeys, "NO"); err != nil {
+					errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+				}
+
+				return
+			}
+
+			if socket.r.ForeignPublicKeyOAEP == nil {
+				fmtLogger.Log(logger.Warn, "Foreign OAEP rsa key is nil after import")
+			}
+		default:
+			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+				Message: "PEM string is not string!",
+			})
+
+			if err := socket.Send(rsaAcceptClientKeys, "NO"); err != nil {
+				errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+			}
+
+			return
+		}
+
+	}
+
+	// Parse PSS PEM data
+	if pemPSS, ok := incomingData["pss"]; ok {
+		switch typedPEM := pemPSS.(type) {
+		case string:
+			if err := socket.r.ImportKey(typedPEM, false); err != nil {
+				errorSocketEvent(
+					fmtLogger,
+					nsp,
+					eventName,
+					socket.ID,
+					&lib.StackError{
+						ParentError: err,
+						Message:     "Error on import PSS key",
+					})
+
+				if err := socket.Send(rsaAcceptClientKeys, "NO"); err != nil {
+					errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+				}
+
+				return
+			}
+
+			if socket.r.ForeignPublicKeyOAEP == nil {
+				fmtLogger.Log(logger.Warn, "Foreign PSS rsa key is nil after import")
+			}
+		default:
+			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+				Message: "PEM string is not string!",
+			})
+
+			if err := socket.Send(rsaAcceptClientKeys, "NO"); err != nil {
+				errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+			}
+
+			return
+		}
+	}
+
+	if err := socket.Send(rsaAcceptClientKeys, "YES"); err != nil {
+		errorSocketEvent(fmtLogger, "secure", eventName, socket.ID, err)
+		return
+	}
+
+	successfulSocketEvent(fmtLogger, "secure", eventName, socket.ID)
+}
+
 // Socket response struct
 type Response struct {
 	Name OutEventName `json:"name"`
@@ -58,11 +160,13 @@ type Response struct {
 type SecureSocket struct {
 	r      *RSA            // RSA object to encode/decode
 	Client *websocket.Conn // Connection instance
+	ID     string          // Socket ID
 }
 
 // Init socket
 func (socket *SecureSocket) Init() error {
 	socket.r = &RSA{}
+	socket.ID = socket.Client.RemoteAddr().String()
 
 	err := socket.r.Init()
 
@@ -82,14 +186,14 @@ func (socket *SecureSocket) Init() error {
 			_, message, err := socket.Client.ReadMessage()
 
 			if err != nil {
-				errorSocketEvent(fmtLogger, "secure", "read", socket.Client.RemoteAddr().String(), err)
+				errorSocketEvent(fmtLogger, "secure", "read", socket.ID, err)
 				return
 			}
 
 			debugSocketEvent(fmtLogger, map[string]interface{}{
 				"Namespace":  "secure",
 				"Event name": "read",
-				"ID":         socket.Client.RemoteAddr().String(),
+				"ID":         socket.ID,
 				"Input":      message,
 			})
 
@@ -98,31 +202,24 @@ func (socket *SecureSocket) Init() error {
 			err = json.Unmarshal(message, &incomingMessage)
 
 			if err != nil {
-				errorSocketEvent(fmtLogger, "secure", "unmarshal", socket.Client.RemoteAddr().String(), err)
+				errorSocketEvent(fmtLogger, "secure", "unmarshal", socket.ID, err)
 			}
 
 			debugSocketEvent(fmtLogger, map[string]interface{}{
 				"Namespace":  "secure",
 				"Event name": "unmarshal",
-				"ID":         socket.Client.RemoteAddr().String(),
+				"ID":         socket.ID,
 				"Input":      incomingMessage,
 			})
 
 			incomingMessageMap := incomingMessage.(map[string]interface{})
-			eventName := incomingMessageMap["name"]
+			eventName := incomingMessageMap["name"].(string)
 
 			switch eventName {
 			case "rsa:getServerKeys":
-				triggerSocketEvent(fmtLogger, "secure", "getKey", socket.Client.RemoteAddr().String())
-
-				if err = socket.SendPublicKeys(); err != nil {
-					errorSocketEvent(fmtLogger, "secure", "getKey", socket.Client.RemoteAddr().String(), err)
-					return
-				}
-
-				successfulSocketEvent(fmtLogger, "secure", "getKey", socket.Client.RemoteAddr().String())
+				getServerKeys("secure", eventName, socket)
 			case "rsa:setClientKeys":
-
+				setClientsKeys(incomingMessageMap, "secure", eventName, socket)
 			}
 		}
 	}()
@@ -130,19 +227,10 @@ func (socket *SecureSocket) Init() error {
 	return nil
 }
 
-func (socket *SecureSocket) Send(eventName OutEventName, data interface{}) error {
-	jsonData, err := json.Marshal(data)
-
-	if err != nil {
-		return &lib.StackError{
-			ParentError: err,
-			Message:     "Error on marshal to json",
-		}
-	}
-
+func (socket *SecureSocket) Send(eventName OutEventName, data string) error {
 	response := &Response{
 		Name: eventName,
-		Data: string(jsonData),
+		Data: data,
 	}
 
 	resJSON, err := json.Marshal(response)
@@ -171,7 +259,7 @@ func (socket *SecureSocket) SendEncryptedMessage(eventName OutEventName, data st
 	encrypted, err := socket.r.Encode(data, "")
 
 	if err == nil {
-		if err := socket.Send(eventName, encrypted); err != nil {
+		if err := socket.Send(eventName, base64.StdEncoding.EncodeToString(encrypted)); err != nil {
 			return err
 		}
 
@@ -211,7 +299,7 @@ func (socket *SecureSocket) SendPublicKeys() error {
 		"PEM":        pemOAEP,
 	})
 
-	bytesPSS, err := asn1.Marshal(*socket.r.OwnPublicKeyPSS)
+	bytesPSS, err := x509.MarshalPKIXPublicKey(socket.r.OwnPublicKeyPSS)
 
 	if err != nil {
 		return &lib.StackError{
@@ -220,23 +308,37 @@ func (socket *SecureSocket) SendPublicKeys() error {
 		}
 	}
 
-	pemPSS := pem.EncodeToMemory(&pem.Block{
+	pemPSS := string(pem.EncodeToMemory(&pem.Block{
 		Type:  "PUBLIC KEY",
 		Bytes: bytesPSS,
-	})
+	}))
 
-	if pemPSS == nil {
+	if pemPSS == "" {
 		return &lib.StackError{
 			Message: "Error on encoding public key(PSS)",
 		}
 	}
+
+	debugSocketEvent(fmtLogger, map[string]interface{}{
+		"Event name": "Encode PSS key to pem",
+		"PEM":        pemPSS,
+	})
 
 	data := map[string]interface{}{
 		"OAEP": pemOAEP,
 		"PSS":  pemPSS,
 	}
 
-	err = socket.Send(rsaSendServerKeys, data)
+	dataJSON, err := json.Marshal(data)
+
+	if err != nil {
+		return &lib.StackError{
+			ParentError: err,
+			Message:     "Error on marshal response to json(public keys)",
+		}
+	}
+
+	err = socket.Send(rsaSendServerKeys, string(dataJSON))
 
 	if err != nil {
 		return &lib.StackError{
