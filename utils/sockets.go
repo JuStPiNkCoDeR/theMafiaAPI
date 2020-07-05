@@ -7,9 +7,10 @@ package utils
 import (
 	"../lib"
 	"../logger"
+	"crypto/x509"
 	"encoding/asn1"
 	"encoding/json"
-	pem2 "encoding/pem"
+	pem "encoding/pem"
 	"fmt"
 	"github.com/gorilla/websocket"
 )
@@ -185,25 +186,30 @@ func (socket *SecureSocket) SendEncryptedMessage(eventName OutEventName, data st
 
 // Send RSA public key as JSON string
 func (socket *SecureSocket) SendPublicKeys() error {
-	bytesOAEP, err := asn1.Marshal(*socket.r.OwnPublicKeyOAEP)
+	bytesOAEP, err := x509.MarshalPKIXPublicKey(socket.r.OwnPublicKeyOAEP)
 
 	if err != nil {
 		return &lib.StackError{
 			ParentError: err,
-			Message:     "Error on ASN marshal for OAEP public key",
+			Message:     "Error on x509 marshal for OAEP public key",
 		}
 	}
 
-	pemOAEP := pem2.EncodeToMemory(&pem2.Block{
+	pemOAEP := string(pem.EncodeToMemory(&pem.Block{
 		Type:  "PUBLIC KEY",
 		Bytes: bytesOAEP,
-	})
+	}))
 
-	if pemOAEP == nil {
+	if pemOAEP == "" {
 		return &lib.StackError{
 			Message: "Error on encoding public key(OAEP)",
 		}
 	}
+
+	debugSocketEvent(fmtLogger, map[string]interface{}{
+		"Event name": "Encode OAEP key to pem",
+		"PEM":        pemOAEP,
+	})
 
 	bytesPSS, err := asn1.Marshal(*socket.r.OwnPublicKeyPSS)
 
@@ -214,7 +220,7 @@ func (socket *SecureSocket) SendPublicKeys() error {
 		}
 	}
 
-	pemPSS := pem2.EncodeToMemory(&pem2.Block{
+	pemPSS := pem.EncodeToMemory(&pem.Block{
 		Type:  "PUBLIC KEY",
 		Bytes: bytesPSS,
 	})

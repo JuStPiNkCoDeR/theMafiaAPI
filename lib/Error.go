@@ -4,8 +4,6 @@
 // Cascading error implementation
 package lib
 
-import "fmt"
-
 // Common stack error struct
 type StackError struct {
 	ParentError error  // Parent error which spawned this error
@@ -16,7 +14,6 @@ type StackError struct {
 func (e *StackError) Error() string {
 	var out = ""
 
-	fmt.Println(e.ParentError)
 	if e.ParentError != nil {
 		out += e.ParentError.Error() + "\n\t"
 	}
