@@ -1,24 +1,34 @@
 package main
 
 import (
+	"./database"
 	"./logger"
 	"./utils"
+	"context"
 	"fmt"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
 
-const port = 8001
+const (
+	port  = 8001
+	dbURI = "mongodb://localhost:2345"
+)
 
-var fmtLogger = &logger.MafiaLogger{IsEnabled: true}
-var secureClients = make(map[*websocket.Conn]*utils.SecureSocket)
-var upgrades = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
+var (
+	fmtLogger     = &logger.MafiaLogger{IsEnabled: true}
+	db            = &database.Database{Logger: fmtLogger, Context: context.TODO(), Options: options.Client().ApplyURI(dbURI)}
+	secureClients = make(map[*websocket.Conn]*utils.SecureSocket)
+	upgrades      = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+)
 
 // Handlers
 func registrationHandler(w http.ResponseWriter, _ *http.Request) {
@@ -32,7 +42,7 @@ func wsSecureHandler(w http.ResponseWriter, r *http.Request) {
 		fmtLogger.Log(logger.Error, fmt.Sprintf("Error on setup of ws connection\nError:\n\t%s", err))
 	}
 
-	secureSocket := &utils.SecureSocket{Client: ws}
+	secureSocket := &utils.SecureSocket{Socket: &utils.Socket{Database: db, Client: ws}}
 
 	err = secureSocket.Init()
 
@@ -46,6 +56,26 @@ func wsSecureHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	router := mux.NewRouter()
 
+	// Setup databases
+	if err := db.Connect(); err != nil {
+		fmtLogger.Log(logger.Error, fmt.Sprintf("Cant establish connection with database(Mongo)\nError:\n\t%s", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := db.Ping(); err != nil {
+		fmtLogger.Log(logger.Error, fmt.Sprintf("Error:\n\t%s", err.Error()))
+		os.Exit(1)
+	}
+
+	db.SelectDatabase("mafia")
+
+	// Adding collections
+	if err := db.AddCollection("profiles"); err != nil {
+		fmtLogger.Log(logger.Error, fmt.Sprintf("Error on adding database collection\nEroor:\n\t%s", err.Error()))
+	}
+
+	fmtLogger.Log(logger.Info, "Connection to the MongoDB successfully established")
+
 	// Setup sockets
 	router.HandleFunc("/ws/secure", wsSecureHandler)
 	fmtLogger.Log(logger.Info, "WebSocket server setup successfully")
@@ -57,5 +87,9 @@ func main() {
 	fmtLogger.Log(logger.Info, fmt.Sprintf("The application is served on %d port\n", port))
 	err := http.ListenAndServe(fmt.Sprintf(":%d", port), router)
 
-	fmtLogger.Log(logger.Error, fmt.Sprintf("The program terminated\nError:\n\t%s", err))
+	if err != nil {
+		fmtLogger.Log(logger.Error, fmt.Sprintf("The program terminated\nError:\n\t%s", err))
+	}
+
+	os.Exit(1)
 }

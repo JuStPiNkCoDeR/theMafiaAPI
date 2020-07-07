@@ -61,19 +61,24 @@ func (d *Database) Connect() error {
 
 	d.Client = client
 
-	d.Logger.Log("debug", "Connected to MongoDB!!!")
+	d.Logger.Log(logger.Debug, "Connected to MongoDB!!!")
 	return nil
 }
 
 // Send light request to the database to check connection.
-func (d *Database) Ping() (err error) {
-	err = d.Client.Ping(d.Context, nil)
+func (d *Database) Ping() error {
+	err := d.Client.Ping(d.Context, nil)
 
 	if err == nil {
-		d.Logger.Log("debug", "Connection successfully pinged")
+		d.Logger.Log(logger.Debug, "Connection successfully pinged")
+
+		return nil
 	}
 
-	return
+	return &lib.StackError{
+		ParentError: err,
+		Message:     "Error on ping database",
+	}
 }
 
 // Close the connection
@@ -81,7 +86,7 @@ func (d *Database) Close() {
 	err := d.Client.Disconnect(d.Context)
 
 	if err == nil {
-		d.Logger.Log("debug", "Connection successfully closed")
+		d.Logger.Log(logger.Debug, "Connection successfully closed")
 	}
 }
 
@@ -89,7 +94,7 @@ func (d *Database) Close() {
 func (d *Database) SelectDatabase(name string, options ...*options.DatabaseOptions) {
 	d.CurrentDatabase = d.Client.Database(name, options...)
 
-	d.Logger.Log("debug", name+" database selected")
+	d.Logger.Log(logger.Debug, name+" database selected")
 }
 
 // Add the collection to the map of current connection
@@ -106,7 +111,7 @@ func (d *Database) AddCollection(name string, options ...*options.CollectionOpti
 
 	d.collections[name] = d.CurrentDatabase.Collection(name, options...)
 
-	d.Logger.Log("debug", name+" collection added to "+d.CurrentDatabase.Name())
+	d.Logger.Log(logger.Debug, name+" collection added to "+d.CurrentDatabase.Name())
 
 	return nil
 }
@@ -120,4 +125,58 @@ func (d *Database) GetCollection(name string) (collection *mongo.Collection, err
 	return nil, &lib.StackError{
 		Message: createErrorMessage(d.Context, "Error: Can't get collection with name "+name, d.Options),
 	}
+}
+
+// Insert given documents to the specified collection
+func (d *Database) Insert(collectionName string, documents []interface{}) error {
+	coll, err := d.GetCollection(collectionName)
+
+	if err != nil {
+		return &lib.StackError{
+			ParentError: err,
+			Message:     "Error on getting database collection",
+		}
+	}
+
+	if len(documents) == 1 {
+		d.Logger.Log(
+			logger.Debug,
+			fmt.Sprintf(
+				"Try to insert one document to '%s' collection\nDocument: %x",
+				collectionName, documents[0],
+			),
+		)
+
+		_, err := coll.InsertOne(d.Context, documents[0])
+
+		if err != nil {
+			return &lib.StackError{
+				ParentError: err,
+				Message:     "Error on inserting to database",
+			}
+		}
+	} else if len(documents) == 0 {
+		return &lib.StackError{
+			Message: "No documents to insert",
+		}
+	} else {
+		d.Logger.Log(
+			logger.Debug,
+			fmt.Sprintf(
+				"Try to insert many documents to '%s' collection\nDocuments: %x",
+				collectionName, documents,
+			),
+		)
+
+		_, err := coll.InsertMany(d.Context, documents)
+
+		if err != nil {
+			return &lib.StackError{
+				ParentError: err,
+				Message:     "Error on inserting to database",
+			}
+		}
+	}
+
+	return nil
 }

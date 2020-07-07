@@ -5,13 +5,15 @@
 package utils
 
 import (
+	"../database"
 	"../lib"
 	"../logger"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	pem "encoding/pem"
+	"encoding/pem"
 	"fmt"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -46,6 +48,7 @@ type OutEventName string
 const (
 	rsaSendServerKeys   OutEventName = "rsa:serverKeys"
 	rsaAcceptClientKeys OutEventName = "rsa:acceptClientKeys"
+	rsaSignUp           OutEventName = "rsa:signUp"
 )
 
 // Events
@@ -143,11 +146,141 @@ func setClientsKeys(incomingMessageMap map[string]interface{}, nsp string, event
 	}
 
 	if err := socket.Send(rsaAcceptClientKeys, "YES"); err != nil {
-		errorSocketEvent(fmtLogger, "secure", eventName, socket.ID, err)
+		errorSocketEvent(fmtLogger, socket.Namespace, eventName, socket.ID, err)
 		return
 	}
 
-	successfulSocketEvent(fmtLogger, "secure", eventName, socket.ID)
+	successfulSocketEvent(fmtLogger, socket.Namespace, eventName, socket.ID)
+}
+
+func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName string, socket *SecureSocket) bool {
+	triggerSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+
+	if socket.r.ForeignPublicKeyPSS == nil {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			Message: "No foreign public RSA-PSS key present",
+		})
+
+		return false
+	}
+
+	if socket.r.privateKeyOAEP == nil {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			Message: "No private RSA-OAEP key present",
+		})
+
+		return false
+	}
+
+	var (
+		incomingData    = incomingMessageMap["data"].(map[string]string)
+		encodedUsername string
+		encodedPassword string
+		username        string
+		password        string
+		signUsername    string
+		signPassword    string
+	)
+
+	if pass, ok := incomingData["password"]; ok {
+		encodedPassword = pass
+	} else {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			Message: "No clients' password presented at incoming data",
+		})
+
+		return false
+	}
+
+	if name, ok := incomingData["name"]; ok {
+		encodedUsername = name
+	} else {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			Message: "No clients' name presented at incoming data",
+		})
+
+		return false
+	}
+
+	if sign, ok := incomingData["signPassword"]; ok {
+		signPassword = sign
+	} else {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			Message: "No clients' sign for password presented at incoming data",
+		})
+
+		return false
+	}
+
+	if sign, ok := incomingData["signName"]; ok {
+		signUsername = sign
+	} else {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			Message: "No clients' sign for name presented at incoming data",
+		})
+
+		return false
+	}
+
+	if err := socket.r.VerifySign([]byte(signUsername), []byte(encodedUsername)); err != nil {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			ParentError: err,
+			Message:     "Error on verification of password sign",
+		})
+
+		return false
+	}
+
+	if err := socket.r.VerifySign([]byte(signPassword), []byte(encodedPassword)); err != nil {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			ParentError: err,
+			Message:     "Error on verification of password sign",
+		})
+
+		return false
+	}
+
+	if name, err := socket.r.Decode([]byte(encodedUsername), []byte("")); err != nil {
+		username = name
+	} else {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			ParentError: err,
+			Message:     "Error on decoding username",
+		})
+
+		return false
+	}
+
+	if pass, err := socket.r.Decode([]byte(encodedPassword), []byte("")); err != nil {
+		password = pass
+	} else {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			ParentError: err,
+			Message:     "Error on decoding password",
+		})
+
+		return false
+	}
+
+	profile := database.Profile{
+		Name:     username,
+		Password: password,
+	}
+
+	err := socket.Database.Insert("profiles", []interface{}{profile})
+
+	if err != nil {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			ParentError: err,
+			Message:     "Error on saving profile data",
+		})
+
+		return false
+	}
+
+	successfulSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+
+	return true
 }
 
 // Socket response struct
@@ -156,78 +289,15 @@ type Response struct {
 	Data string       `json:"data"`
 }
 
-// Socket that use RSA encryption
-type SecureSocket struct {
-	r      *RSA            // RSA object to encode/decode
-	Client *websocket.Conn // Connection instance
-	ID     string          // Socket ID
+// Common socket struct
+type Socket struct {
+	Database  *database.Database // Database connection instance
+	Client    *websocket.Conn    // Connection instance
+	ID        string             // Socket ID
+	Namespace string             // Current socket namespace
 }
 
-// Init socket
-func (socket *SecureSocket) Init() error {
-	socket.r = &RSA{}
-	socket.ID = socket.Client.RemoteAddr().String()
-
-	err := socket.r.Init()
-
-	if err != nil {
-		return &lib.StackError{
-			ParentError: err,
-			Message:     "Error on initializing of secure socket",
-		}
-	}
-
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-
-		for {
-			_, message, err := socket.Client.ReadMessage()
-
-			if err != nil {
-				errorSocketEvent(fmtLogger, "secure", "read", socket.ID, err)
-				return
-			}
-
-			debugSocketEvent(fmtLogger, map[string]interface{}{
-				"Namespace":  "secure",
-				"Event name": "read",
-				"ID":         socket.ID,
-				"Input":      message,
-			})
-
-			var incomingMessage interface{}
-
-			err = json.Unmarshal(message, &incomingMessage)
-
-			if err != nil {
-				errorSocketEvent(fmtLogger, "secure", "unmarshal", socket.ID, err)
-			}
-
-			debugSocketEvent(fmtLogger, map[string]interface{}{
-				"Namespace":  "secure",
-				"Event name": "unmarshal",
-				"ID":         socket.ID,
-				"Input":      incomingMessage,
-			})
-
-			incomingMessageMap := incomingMessage.(map[string]interface{})
-			eventName := incomingMessageMap["name"].(string)
-
-			switch eventName {
-			case "rsa:getServerKeys":
-				getServerKeys("secure", eventName, socket)
-			case "rsa:setClientKeys":
-				setClientsKeys(incomingMessageMap, "secure", eventName, socket)
-			}
-		}
-	}()
-
-	return nil
-}
-
-func (socket *SecureSocket) Send(eventName OutEventName, data string) error {
+func (socket *Socket) Send(eventName OutEventName, data string) error {
 	response := &Response{
 		Name: eventName,
 		Data: data,
@@ -250,6 +320,93 @@ func (socket *SecureSocket) Send(eventName OutEventName, data string) error {
 			Message:     "Error on writing to socket",
 		}
 	}
+
+	return nil
+}
+
+// Socket that use RSA encryption
+type SecureSocket struct {
+	r *RSA // RSA object to encode/decode
+	*Socket
+}
+
+// Init socket
+func (socket *SecureSocket) Init() error {
+	socket.r = &RSA{}
+	socket.ID = socket.Client.RemoteAddr().String()
+	socket.Namespace = "secure"
+
+	err := socket.r.Init()
+
+	if err != nil {
+		return &lib.StackError{
+			ParentError: err,
+			Message:     "Error on initializing of secure socket",
+		}
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		for {
+			_, message, err := socket.Client.ReadMessage()
+
+			if err != nil {
+				errorSocketEvent(fmtLogger, socket.Namespace, "read", socket.ID, err)
+				return
+			}
+
+			debugSocketEvent(fmtLogger, map[string]interface{}{
+				"Namespace":  socket.Namespace,
+				"Event name": "read",
+				"ID":         socket.ID,
+				"Input":      message,
+			})
+
+			var incomingMessage interface{}
+
+			err = json.Unmarshal(message, &incomingMessage)
+
+			if err != nil {
+				errorSocketEvent(fmtLogger, socket.Namespace, "unmarshal", socket.ID, err)
+			}
+
+			debugSocketEvent(fmtLogger, map[string]interface{}{
+				"Namespace":  socket.Namespace,
+				"Event name": "unmarshal",
+				"ID":         socket.ID,
+				"Input":      incomingMessage,
+			})
+
+			incomingMessageMap := incomingMessage.(map[string]interface{})
+			eventName := incomingMessageMap["name"].(string)
+
+			switch eventName {
+			case "rsa:getServerKeys":
+				getServerKeys(socket.Namespace, eventName, socket)
+			case "rsa:setClientKeys":
+				setClientsKeys(incomingMessageMap, socket.Namespace, eventName, socket)
+			case "rsa:signUp":
+				if isSaved := signUp(incomingMessageMap, socket.Namespace, eventName, socket); isSaved {
+					if err := socket.SendEncryptedMessage(rsaSignUp, "YES"); err != nil {
+						errorSocketEvent(fmtLogger, socket.Namespace, eventName, socket.ID, &lib.StackError{
+							ParentError: err,
+							Message:     "Error on sending encrypted message",
+						})
+					}
+				} else {
+					if err := socket.SendEncryptedMessage(rsaSignUp, "NO"); err != nil {
+						errorSocketEvent(fmtLogger, socket.Namespace, eventName, socket.ID, &lib.StackError{
+							ParentError: err,
+							Message:     "Error on sending encrypted message",
+						})
+					}
+				}
+			}
+		}
+	}()
 
 	return nil
 }
