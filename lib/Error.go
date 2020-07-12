@@ -20,3 +20,11 @@ func (e *StackError) Error() string {
 
 	return out + e.Message
 }
+
+// Make StackError
+func Wrap(err error, message string) *StackError {
+	return &StackError{
+		ParentError: err,
+		Message:     message,
+	}
+}

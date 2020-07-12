@@ -142,8 +142,8 @@ func (d *Database) Insert(collectionName string, documents []interface{}) error 
 		d.Logger.Log(
 			logger.Debug,
 			fmt.Sprintf(
-				"Try to insert one document to '%s' collection\nDocument: %x",
-				collectionName, documents[0],
+				"Try to insert one document to '%s' collection",
+				collectionName,
 			),
 		)
 
@@ -163,8 +163,8 @@ func (d *Database) Insert(collectionName string, documents []interface{}) error 
 		d.Logger.Log(
 			logger.Debug,
 			fmt.Sprintf(
-				"Try to insert many documents to '%s' collection\nDocuments: %x",
-				collectionName, documents,
+				"Try to insert many documents to '%s' collection",
+				collectionName,
 			),
 		)
 

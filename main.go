@@ -4,24 +4,27 @@ import (
 	"./database"
 	"./logger"
 	"./utils"
+	"time"
+
 	"context"
 	"fmt"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"net/http"
 	"os"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
 	port  = 8001
-	dbURI = "mongodb://localhost:2345"
+	dbURI = "mongodb://godfather:shawUorResPikT@127.0.0.1:2345/mafia"
 )
 
 var (
 	fmtLogger     = &logger.MafiaLogger{IsEnabled: true}
-	db            = &database.Database{Logger: fmtLogger, Context: context.TODO(), Options: options.Client().ApplyURI(dbURI)}
+	ctx, cancel   = context.WithTimeout(context.Background(), 10*time.Second)
+	db            = &database.Database{Logger: fmtLogger, Context: ctx, Options: options.Client().ApplyURI(dbURI)}
 	secureClients = make(map[*websocket.Conn]*utils.SecureSocket)
 	upgrades      = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
@@ -61,6 +64,8 @@ func main() {
 		fmtLogger.Log(logger.Error, fmt.Sprintf("Cant establish connection with database(Mongo)\nError:\n\t%s", err.Error()))
 		os.Exit(1)
 	}
+	defer cancel()
+	defer db.Close()
 
 	if err := db.Ping(); err != nil {
 		fmtLogger.Log(logger.Error, fmt.Sprintf("Error:\n\t%s", err.Error()))
@@ -74,7 +79,7 @@ func main() {
 		fmtLogger.Log(logger.Error, fmt.Sprintf("Error on adding database collection\nEroor:\n\t%s", err.Error()))
 	}
 
-	fmtLogger.Log(logger.Info, "Connection to the MongoDB successfully established")
+	fmtLogger.Log(logger.Info, "Connection to the MongoDB established successfully")
 
 	// Setup sockets
 	router.HandleFunc("/ws/secure", wsSecureHandler)

@@ -8,6 +8,7 @@ import (
 	"../database"
 	"../lib"
 	"../logger"
+
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"fmt"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var fmtLogger = &logger.MafiaLogger{IsEnabled: true}
@@ -40,7 +42,7 @@ func successfulSocketEvent(outStream logger.Logger, nsp string, eventName string
 }
 
 func errorSocketEvent(outStream logger.Logger, nsp string, eventName string, ID string, err error) {
-	outStream.Log(logger.Error, fmt.Sprintf("Error on socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n\tError:\n\t\t%s\n", nsp, eventName, ID, err.Error()))
+	outStream.Log(logger.Error, fmt.Sprintf("Error on socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n\tError:\n\t%s\n", nsp, eventName, ID, err.Error()))
 }
 
 type OutEventName string
@@ -156,6 +158,7 @@ func setClientsKeys(incomingMessageMap map[string]interface{}, nsp string, event
 func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName string, socket *SecureSocket) bool {
 	triggerSocketEvent(fmtLogger, nsp, eventName, socket.ID)
 
+	// Check if RSA-PSS clients key presents
 	if socket.r.ForeignPublicKeyPSS == nil {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
 			Message: "No foreign public RSA-PSS key present",
@@ -164,6 +167,7 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		return false
 	}
 
+	// Check if own private RSA-OAEP key presents
 	if socket.r.privateKeyOAEP == nil {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
 			Message: "No private RSA-OAEP key present",
@@ -173,17 +177,28 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 	}
 
 	var (
-		incomingData    = incomingMessageMap["data"].(map[string]string)
-		encodedUsername string
-		encodedPassword string
+		incomingData    = incomingMessageMap["data"].(map[string]interface{})
+		encodedUsername []byte
+		encodedPassword []byte
 		username        string
 		password        string
-		signUsername    string
-		signPassword    string
+		signUsername    []byte
+		signPassword    []byte
 	)
 
+	// Get password base64 string and decode it
 	if pass, ok := incomingData["password"]; ok {
-		encodedPassword = pass
+		buff, err := base64.StdEncoding.DecodeString(pass.(string))
+
+		if err != nil {
+			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+				Message: "Can't decode base64 encoded string(Field name: `password`)",
+			})
+
+			return false
+		}
+
+		encodedPassword = buff
 	} else {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
 			Message: "No clients' password presented at incoming data",
@@ -192,8 +207,19 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		return false
 	}
 
+	// Get name base64 string and decode it
 	if name, ok := incomingData["name"]; ok {
-		encodedUsername = name
+		buff, err := base64.StdEncoding.DecodeString(name.(string))
+
+		if err != nil {
+			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+				Message: "Can't decode base64 encoded string(Field name: `name`)",
+			})
+
+			return false
+		}
+
+		encodedUsername = buff
 	} else {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
 			Message: "No clients' name presented at incoming data",
@@ -202,8 +228,19 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		return false
 	}
 
+	// Get password signature base64 string and decode it
 	if sign, ok := incomingData["signPassword"]; ok {
-		signPassword = sign
+		buff, err := base64.StdEncoding.DecodeString(sign.(string))
+
+		if err != nil {
+			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+				Message: "Can't decode base64 encoded string(Field name: `signPassword`)",
+			})
+
+			return false
+		}
+
+		signPassword = buff
 	} else {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
 			Message: "No clients' sign for password presented at incoming data",
@@ -212,8 +249,19 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		return false
 	}
 
+	// Get name signature base64 string and decode it
 	if sign, ok := incomingData["signName"]; ok {
-		signUsername = sign
+		buff, err := base64.StdEncoding.DecodeString(sign.(string))
+
+		if err != nil {
+			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+				Message: "Can't decode base64 encoded string(Field name: `signName`)",
+			})
+
+			return false
+		}
+
+		signUsername = buff
 	} else {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
 			Message: "No clients' sign for name presented at incoming data",
@@ -222,7 +270,18 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		return false
 	}
 
-	if err := socket.r.VerifySign([]byte(signUsername), []byte(encodedUsername)); err != nil {
+	// Verify username signature
+	if err := socket.r.VerifySign(signUsername, encodedUsername); err != nil {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			ParentError: err,
+			Message:     "Error on verification of name sign",
+		})
+
+		return false
+	}
+
+	// Verify password signature
+	if err := socket.r.VerifySign(signPassword, encodedPassword); err != nil {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
 			ParentError: err,
 			Message:     "Error on verification of password sign",
@@ -231,16 +290,8 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		return false
 	}
 
-	if err := socket.r.VerifySign([]byte(signPassword), []byte(encodedPassword)); err != nil {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
-			ParentError: err,
-			Message:     "Error on verification of password sign",
-		})
-
-		return false
-	}
-
-	if name, err := socket.r.Decode([]byte(encodedUsername), []byte("")); err != nil {
+	// Decode username
+	if name, err := socket.r.Decode(encodedUsername, []byte("")); err == nil {
 		username = name
 	} else {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
@@ -251,7 +302,8 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		return false
 	}
 
-	if pass, err := socket.r.Decode([]byte(encodedPassword), []byte("")); err != nil {
+	// Decode password
+	if pass, err := socket.r.Decode(encodedPassword, []byte("")); err == nil {
 		password = pass
 	} else {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
@@ -262,12 +314,29 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		return false
 	}
 
-	profile := database.Profile{
-		Name:     username,
-		Password: password,
+	// Make hash string from password
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+
+	if err != nil {
+		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, lib.Wrap(err, "Can't create hash from password"))
+
+		return false
 	}
 
-	err := socket.Database.Insert("profiles", []interface{}{profile})
+	// Create profile object
+	profile := database.Profile{
+		Name:     username,
+		Password: string(hash),
+	}
+
+	debugSocketEvent(fmtLogger, map[string]string{
+		"Event name": "rsa:signUp",
+		"Username":   username,
+		"Password":   password,
+	})
+
+	// Save to the profiles collection
+	err = socket.Database.Insert("profiles", []interface{}{profile})
 
 	if err != nil {
 		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{

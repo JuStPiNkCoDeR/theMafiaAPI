@@ -2,11 +2,18 @@ version: "3.4"
 
 services:
   database:
-    image: mongo:latest
+    image: mongo:4.2.8
+    container_name: mongo
     command: [--auth]
+    restart: always
     ports:
       - '2345:27017'
     environment:
-      - MONGODB_PASSWORD=realllyHordPasward
-      - MONGODB_USER=mafia
-      - MONGODB_DATABASE=mafia
+      - MONGO_INITDB_ROOT_PASSWORD=realllyHordPasward
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_DATABASE=mafia
+      - MONGO_PORT=27017
+      - DATABASE_USERNAME=godfather
+      - DATABASE_PASSWORD=shawUorResPikT
+    volumes:
+      - ./docker/:/docker-entrypoint-initdb.d
