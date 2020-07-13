@@ -15,5 +15,3 @@ services:
       - MONGO_PORT=27017
       - DATABASE_USERNAME=godfather
       - DATABASE_PASSWORD=shawUorResPikT
-    volumes:
-      - ./docker/:/docker-entrypoint-initdb.d

@@ -21,30 +21,6 @@ import (
 
 var fmtLogger = &logger.MafiaLogger{IsEnabled: true}
 
-// Log functions
-func debugSocketEvent(outStream logger.Logger, data interface{}) {
-	dataJSON, err := json.Marshal(data)
-
-	if err != nil {
-		outStream.Log(logger.Error, fmt.Sprintf("Unable to serialize data for debug\nError:\n\t%s\n", err))
-		return
-	}
-
-	outStream.Log(logger.Debug, fmt.Sprintf("Debug socket event\nData:\n\t%s\n", string(dataJSON)))
-}
-
-func triggerSocketEvent(outStream logger.Logger, nsp string, eventName string, ID string) {
-	outStream.Log(logger.Debug, fmt.Sprintf("Triggered socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n", nsp, eventName, ID))
-}
-
-func successfulSocketEvent(outStream logger.Logger, nsp string, eventName string, ID string) {
-	outStream.Log(logger.Debug, fmt.Sprintf("Socket event passed OK\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n", nsp, eventName, ID))
-}
-
-func errorSocketEvent(outStream logger.Logger, nsp string, eventName string, ID string, err error) {
-	outStream.Log(logger.Error, fmt.Sprintf("Error on socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n\tError:\n\t%s\n", nsp, eventName, ID, err.Error()))
-}
-
 type OutEventName string
 
 const (
@@ -53,20 +29,44 @@ const (
 	rsaSignUp           OutEventName = "rsa:signUp"
 )
 
-// Events
-func getServerKeys(nsp string, eventName string, socket *SecureSocket) {
-	triggerSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+// Log functions
+func debugSocketEvent(outStream logger.Logger, data interface{}, socket *Socket) {
+	dataJSON, err := json.Marshal(data)
 
-	if err := socket.SendPublicKeys(); err != nil {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+	if err != nil {
+		outStream.Log(logger.Error, fmt.Sprintf("Unable to serialize data for debug\nError:\n\t%s", err), socket.LogKey)
 		return
 	}
 
-	successfulSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+	outStream.Log(logger.Debug, fmt.Sprintf("Debug socket event\nData:\n\t%s", string(dataJSON)), socket.LogKey)
 }
 
-func setClientsKeys(incomingMessageMap map[string]interface{}, nsp string, eventName string, socket *SecureSocket) {
-	triggerSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+func triggerSocketEvent(outStream logger.Logger, eventName string, socket *Socket) {
+	outStream.Log(logger.Debug, fmt.Sprintf("Triggered socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s", socket.Namespace, eventName, socket.ID), socket.LogKey)
+}
+
+func successfulSocketEvent(outStream logger.Logger, eventName string, socket *Socket) {
+	outStream.Log(logger.Debug, fmt.Sprintf("Socket event passed OK\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s", socket.Namespace, eventName, socket.ID), socket.LogKey)
+}
+
+func errorSocketEvent(outStream logger.Logger, eventName string, err error, socket *Socket) {
+	outStream.Log(logger.Error, fmt.Sprintf("Error on socket event\n\tNamespace: %s\n\tEvent name: %s\n\tID: %s\n\tError:\n\t%s", socket.Namespace, eventName, socket.ID, err.Error()), socket.LogKey)
+}
+
+// Events
+func getServerKeys(eventName string, socket *SecureSocket) {
+	triggerSocketEvent(fmtLogger, eventName, socket.Socket)
+
+	if err := socket.SendPublicKeys(); err != nil {
+		errorSocketEvent(fmtLogger, eventName, err, socket.Socket)
+		return
+	}
+
+	successfulSocketEvent(fmtLogger, eventName, socket.Socket)
+}
+
+func setClientsKeys(incomingMessageMap map[string]interface{}, eventName string, socket *SecureSocket) {
+	triggerSocketEvent(fmtLogger, eventName, socket.Socket)
 
 	incomingData := incomingMessageMap["data"].(map[string]interface{})
 
@@ -76,32 +76,29 @@ func setClientsKeys(incomingMessageMap map[string]interface{}, nsp string, event
 		case string:
 			if err := socket.r.ImportKey(typedPEM, true); err != nil {
 				errorSocketEvent(
-					fmtLogger,
-					nsp,
-					eventName,
-					socket.ID,
+					fmtLogger, eventName,
 					&lib.StackError{
 						ParentError: err,
 						Message:     "Error on import OAEP key",
-					})
+					}, socket.Socket)
 
 				if err := socket.Send(rsaAcceptClientKeys, "NO"); err != nil {
-					errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+					errorSocketEvent(fmtLogger, eventName, err, socket.Socket)
 				}
 
 				return
 			}
 
 			if socket.r.ForeignPublicKeyOAEP == nil {
-				fmtLogger.Log(logger.Warn, "Foreign OAEP rsa key is nil after import")
+				fmtLogger.Log(logger.Warn, "Foreign OAEP rsa key is nil after import", socket.LogKey)
 			}
 		default:
-			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 				Message: "PEM string is not string!",
-			})
+			}, socket.Socket)
 
 			if err := socket.Send(rsaAcceptClientKeys, "NO"); err != nil {
-				errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+				errorSocketEvent(fmtLogger, eventName, err, socket.Socket)
 			}
 
 			return
@@ -115,32 +112,29 @@ func setClientsKeys(incomingMessageMap map[string]interface{}, nsp string, event
 		case string:
 			if err := socket.r.ImportKey(typedPEM, false); err != nil {
 				errorSocketEvent(
-					fmtLogger,
-					nsp,
-					eventName,
-					socket.ID,
+					fmtLogger, eventName,
 					&lib.StackError{
 						ParentError: err,
 						Message:     "Error on import PSS key",
-					})
+					}, socket.Socket)
 
 				if err := socket.Send(rsaAcceptClientKeys, "NO"); err != nil {
-					errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+					errorSocketEvent(fmtLogger, eventName, err, socket.Socket)
 				}
 
 				return
 			}
 
 			if socket.r.ForeignPublicKeyOAEP == nil {
-				fmtLogger.Log(logger.Warn, "Foreign PSS rsa key is nil after import")
+				fmtLogger.Log(logger.Warn, "Foreign PSS rsa key is nil after import", socket.LogKey)
 			}
 		default:
-			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 				Message: "PEM string is not string!",
-			})
+			}, socket.Socket)
 
 			if err := socket.Send(rsaAcceptClientKeys, "NO"); err != nil {
-				errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, err)
+				errorSocketEvent(fmtLogger, eventName, err, socket.Socket)
 			}
 
 			return
@@ -148,30 +142,30 @@ func setClientsKeys(incomingMessageMap map[string]interface{}, nsp string, event
 	}
 
 	if err := socket.Send(rsaAcceptClientKeys, "YES"); err != nil {
-		errorSocketEvent(fmtLogger, socket.Namespace, eventName, socket.ID, err)
+		errorSocketEvent(fmtLogger, eventName, err, socket.Socket)
 		return
 	}
 
-	successfulSocketEvent(fmtLogger, socket.Namespace, eventName, socket.ID)
+	successfulSocketEvent(fmtLogger, eventName, socket.Socket)
 }
 
-func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName string, socket *SecureSocket) bool {
-	triggerSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+func signUp(incomingMessageMap map[string]interface{}, eventName string, socket *SecureSocket) bool {
+	triggerSocketEvent(fmtLogger, eventName, socket.Socket)
 
 	// Check if RSA-PSS clients key presents
 	if socket.r.ForeignPublicKeyPSS == nil {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			Message: "No foreign public RSA-PSS key present",
-		})
+		}, socket.Socket)
 
 		return false
 	}
 
 	// Check if own private RSA-OAEP key presents
 	if socket.r.privateKeyOAEP == nil {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			Message: "No private RSA-OAEP key present",
-		})
+		}, socket.Socket)
 
 		return false
 	}
@@ -191,18 +185,18 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		buff, err := base64.StdEncoding.DecodeString(pass.(string))
 
 		if err != nil {
-			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 				Message: "Can't decode base64 encoded string(Field name: `password`)",
-			})
+			}, socket.Socket)
 
 			return false
 		}
 
 		encodedPassword = buff
 	} else {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			Message: "No clients' password presented at incoming data",
-		})
+		}, socket.Socket)
 
 		return false
 	}
@@ -212,80 +206,80 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		buff, err := base64.StdEncoding.DecodeString(name.(string))
 
 		if err != nil {
-			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 				Message: "Can't decode base64 encoded string(Field name: `name`)",
-			})
+			}, socket.Socket)
 
 			return false
 		}
 
 		encodedUsername = buff
 	} else {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			Message: "No clients' name presented at incoming data",
-		})
+		}, socket.Socket)
 
 		return false
 	}
 
 	// Get password signature base64 string and decode it
-	if sign, ok := incomingData["signPassword"]; ok {
+	if sign, ok := incomingData["passwordSign"]; ok {
 		buff, err := base64.StdEncoding.DecodeString(sign.(string))
 
 		if err != nil {
-			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 				Message: "Can't decode base64 encoded string(Field name: `signPassword`)",
-			})
+			}, socket.Socket)
 
 			return false
 		}
 
 		signPassword = buff
 	} else {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			Message: "No clients' sign for password presented at incoming data",
-		})
+		}, socket.Socket)
 
 		return false
 	}
 
 	// Get name signature base64 string and decode it
-	if sign, ok := incomingData["signName"]; ok {
+	if sign, ok := incomingData["nameSign"]; ok {
 		buff, err := base64.StdEncoding.DecodeString(sign.(string))
 
 		if err != nil {
-			errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+			errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 				Message: "Can't decode base64 encoded string(Field name: `signName`)",
-			})
+			}, socket.Socket)
 
 			return false
 		}
 
 		signUsername = buff
 	} else {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			Message: "No clients' sign for name presented at incoming data",
-		})
+		}, socket.Socket)
 
 		return false
 	}
 
 	// Verify username signature
 	if err := socket.r.VerifySign(signUsername, encodedUsername); err != nil {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			ParentError: err,
 			Message:     "Error on verification of name sign",
-		})
+		}, socket.Socket)
 
 		return false
 	}
 
 	// Verify password signature
 	if err := socket.r.VerifySign(signPassword, encodedPassword); err != nil {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			ParentError: err,
 			Message:     "Error on verification of password sign",
-		})
+		}, socket.Socket)
 
 		return false
 	}
@@ -294,10 +288,10 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 	if name, err := socket.r.Decode(encodedUsername, []byte("")); err == nil {
 		username = name
 	} else {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			ParentError: err,
 			Message:     "Error on decoding username",
-		})
+		}, socket.Socket)
 
 		return false
 	}
@@ -306,10 +300,10 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 	if pass, err := socket.r.Decode(encodedPassword, []byte("")); err == nil {
 		password = pass
 	} else {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			ParentError: err,
 			Message:     "Error on decoding password",
-		})
+		}, socket.Socket)
 
 		return false
 	}
@@ -318,7 +312,7 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 
 	if err != nil {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, lib.Wrap(err, "Can't create hash from password"))
+		errorSocketEvent(fmtLogger, eventName, lib.Wrap(err, "Can't create hash from password"), socket.Socket)
 
 		return false
 	}
@@ -333,21 +327,21 @@ func signUp(incomingMessageMap map[string]interface{}, nsp string, eventName str
 		"Event name": "rsa:signUp",
 		"Username":   username,
 		"Password":   password,
-	})
+	}, socket.Socket)
 
 	// Save to the profiles collection
-	err = socket.Database.Insert("profiles", []interface{}{profile})
+	err = socket.Database.Insert("profiles", []interface{}{profile}, socket.LogKey)
 
 	if err != nil {
-		errorSocketEvent(fmtLogger, nsp, eventName, socket.ID, &lib.StackError{
+		errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 			ParentError: err,
 			Message:     "Error on saving profile data",
-		})
+		}, socket.Socket)
 
 		return false
 	}
 
-	successfulSocketEvent(fmtLogger, nsp, eventName, socket.ID)
+	successfulSocketEvent(fmtLogger, eventName, socket.Socket)
 
 	return true
 }
@@ -364,6 +358,7 @@ type Socket struct {
 	Client    *websocket.Conn    // Connection instance
 	ID        string             // Socket ID
 	Namespace string             // Current socket namespace
+	LogKey    string             // Request ID that send client
 }
 
 func (socket *Socket) Send(eventName OutEventName, data string) error {
@@ -423,8 +418,13 @@ func (socket *SecureSocket) Init() error {
 			_, message, err := socket.Client.ReadMessage()
 
 			if err != nil {
-				errorSocketEvent(fmtLogger, socket.Namespace, "read", socket.ID, err)
-				return
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure) {
+					errorSocketEvent(fmtLogger, "read", err, socket.Socket)
+				} else {
+					debugSocketEvent(fmtLogger, "Socket close normally", socket.Socket)
+				}
+
+				break
 			}
 
 			debugSocketEvent(fmtLogger, map[string]interface{}{
@@ -432,14 +432,14 @@ func (socket *SecureSocket) Init() error {
 				"Event name": "read",
 				"ID":         socket.ID,
 				"Input":      message,
-			})
+			}, socket.Socket)
 
 			var incomingMessage interface{}
 
 			err = json.Unmarshal(message, &incomingMessage)
 
 			if err != nil {
-				errorSocketEvent(fmtLogger, socket.Namespace, "unmarshal", socket.ID, err)
+				errorSocketEvent(fmtLogger, "unmarshal", err, socket.Socket)
 			}
 
 			debugSocketEvent(fmtLogger, map[string]interface{}{
@@ -447,30 +447,31 @@ func (socket *SecureSocket) Init() error {
 				"Event name": "unmarshal",
 				"ID":         socket.ID,
 				"Input":      incomingMessage,
-			})
+			}, socket.Socket)
 
 			incomingMessageMap := incomingMessage.(map[string]interface{})
 			eventName := incomingMessageMap["name"].(string)
+			socket.LogKey = incomingMessageMap["reqID"].(string)
 
 			switch eventName {
 			case "rsa:getServerKeys":
-				getServerKeys(socket.Namespace, eventName, socket)
+				getServerKeys(eventName, socket)
 			case "rsa:setClientKeys":
-				setClientsKeys(incomingMessageMap, socket.Namespace, eventName, socket)
+				setClientsKeys(incomingMessageMap, eventName, socket)
 			case "rsa:signUp":
-				if isSaved := signUp(incomingMessageMap, socket.Namespace, eventName, socket); isSaved {
+				if isSaved := signUp(incomingMessageMap, eventName, socket); isSaved {
 					if err := socket.SendEncryptedMessage(rsaSignUp, "YES"); err != nil {
-						errorSocketEvent(fmtLogger, socket.Namespace, eventName, socket.ID, &lib.StackError{
+						errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 							ParentError: err,
 							Message:     "Error on sending encrypted message",
-						})
+						}, socket.Socket)
 					}
 				} else {
 					if err := socket.SendEncryptedMessage(rsaSignUp, "NO"); err != nil {
-						errorSocketEvent(fmtLogger, socket.Namespace, eventName, socket.ID, &lib.StackError{
+						errorSocketEvent(fmtLogger, eventName, &lib.StackError{
 							ParentError: err,
 							Message:     "Error on sending encrypted message",
-						})
+						}, socket.Socket)
 					}
 				}
 			}
@@ -523,7 +524,7 @@ func (socket *SecureSocket) SendPublicKeys() error {
 	debugSocketEvent(fmtLogger, map[string]interface{}{
 		"Event name": "Encode OAEP key to pem",
 		"PEM":        pemOAEP,
-	})
+	}, socket.Socket)
 
 	bytesPSS, err := x509.MarshalPKIXPublicKey(socket.r.OwnPublicKeyPSS)
 
@@ -548,7 +549,7 @@ func (socket *SecureSocket) SendPublicKeys() error {
 	debugSocketEvent(fmtLogger, map[string]interface{}{
 		"Event name": "Encode PSS key to pem",
 		"PEM":        pemPSS,
-	})
+	}, socket.Socket)
 
 	data := map[string]interface{}{
 		"OAEP": pemOAEP,

@@ -10,7 +10,7 @@ import (
 )
 
 // Function to print message
-type LogFunction func(string)
+type LogFunction func(string, string)
 
 // Type of log case
 type LogType string
@@ -33,26 +33,26 @@ func getTime() string {
 }
 
 var logsMap = map[LogType]LogFunction{
-	Info: func(message string) {
-		fmt.Printf(infoColor, getTime()+": "+message) // Colorize message with Info color = "\033[1;34m%s\033[0m"
+	Info: func(message string, key string) {
+		fmt.Printf(infoColor, "/***LOG START***/\n"+getTime()+"\nKEY: "+key+"\n\n"+message+"\n/---LOG END---/\n") // Colorize message with Info color = "\033[1;34m%s\033[0m"
 	},
-	Notice: func(message string) {
-		fmt.Printf(noticeColor, getTime()+": "+message) // Colorize message with Notice color = "\033[1;36m%s\033[0m"
+	Notice: func(message string, key string) {
+		fmt.Printf(noticeColor, "/***LOG START***/\n"+getTime()+"\nKEY: "+key+"\n\n"+message+"\n/---LOG END---/\n") // Colorize message with Notice color = "\033[1;36m%s\033[0m"
 	},
-	Warn: func(message string) {
-		fmt.Printf(warningColor, getTime()+": "+message) // Colorize message with Warn color = "\033[1;33m%s\033[0m"
+	Warn: func(message string, key string) {
+		fmt.Printf(warningColor, "/***LOG START***/\n"+getTime()+"\nKEY: "+key+"\n\n"+message+"\n/---LOG END---/\n") // Colorize message with Warn color = "\033[1;33m%s\033[0m"
 	},
-	Error: func(message string) {
-		fmt.Printf(errorColor, getTime()+": "+message) // Colorize message with Error color = "\033[1;31m%s\033[0m"
+	Error: func(message string, key string) {
+		fmt.Printf(errorColor, "/***LOG START***/\n"+getTime()+"\nKEY: "+key+"\n\n"+message+"\n/---LOG END---/\n") // Colorize message with Error color = "\033[1;31m%s\033[0m"
 	},
-	Debug: func(message string) {
-		fmt.Printf(debugColor, getTime()+": "+message) // Colorize message with Debug color = "\033[0;36m%s\033[0m"
+	Debug: func(message string, key string) {
+		fmt.Printf(debugColor, "/***LOG START***/\n"+getTime()+"\nKEY: "+key+"\n\n"+message+"\n/---LOG END---/\n") // Colorize message with Debug color = "\033[0;36m%s\033[0m"
 	},
 }
 
 // Root logger interface
 type Logger interface {
-	Log(logType LogType, message string)
+	Log(logType LogType, message string, key string)
 }
 
 // Implementation for current project
@@ -61,10 +61,10 @@ type MafiaLogger struct {
 }
 
 // Print message to the current output stream
-func (l *MafiaLogger) Log(logType LogType, message string) {
+func (l *MafiaLogger) Log(logType LogType, message string, key string) {
 	if l.IsEnabled {
 		if logFunc, ok := logsMap[logType]; ok {
-			logFunc(message)
+			logFunc(message, key)
 		}
 	}
 }

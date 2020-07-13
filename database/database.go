@@ -61,7 +61,7 @@ func (d *Database) Connect() error {
 
 	d.Client = client
 
-	d.Logger.Log(logger.Debug, "Connected to MongoDB!!!")
+	d.Logger.Log(logger.Debug, "Connected to MongoDB!!!", "Database")
 	return nil
 }
 
@@ -70,7 +70,7 @@ func (d *Database) Ping() error {
 	err := d.Client.Ping(d.Context, nil)
 
 	if err == nil {
-		d.Logger.Log(logger.Debug, "Connection successfully pinged")
+		d.Logger.Log(logger.Debug, "Connection successfully pinged", "Database")
 
 		return nil
 	}
@@ -86,7 +86,7 @@ func (d *Database) Close() {
 	err := d.Client.Disconnect(d.Context)
 
 	if err == nil {
-		d.Logger.Log(logger.Debug, "Connection successfully closed")
+		d.Logger.Log(logger.Debug, "Connection successfully closed", "Database")
 	}
 }
 
@@ -94,7 +94,7 @@ func (d *Database) Close() {
 func (d *Database) SelectDatabase(name string, options ...*options.DatabaseOptions) {
 	d.CurrentDatabase = d.Client.Database(name, options...)
 
-	d.Logger.Log(logger.Debug, name+" database selected")
+	d.Logger.Log(logger.Debug, name+" database selected", "Database")
 }
 
 // Add the collection to the map of current connection
@@ -111,7 +111,7 @@ func (d *Database) AddCollection(name string, options ...*options.CollectionOpti
 
 	d.collections[name] = d.CurrentDatabase.Collection(name, options...)
 
-	d.Logger.Log(logger.Debug, name+" collection added to "+d.CurrentDatabase.Name())
+	d.Logger.Log(logger.Debug, name+" collection added to "+d.CurrentDatabase.Name(), "Database")
 
 	return nil
 }
@@ -128,7 +128,7 @@ func (d *Database) GetCollection(name string) (collection *mongo.Collection, err
 }
 
 // Insert given documents to the specified collection
-func (d *Database) Insert(collectionName string, documents []interface{}) error {
+func (d *Database) Insert(collectionName string, documents []interface{}, key string) error {
 	coll, err := d.GetCollection(collectionName)
 
 	if err != nil {
@@ -145,6 +145,7 @@ func (d *Database) Insert(collectionName string, documents []interface{}) error 
 				"Try to insert one document to '%s' collection",
 				collectionName,
 			),
+			key,
 		)
 
 		_, err := coll.InsertOne(d.Context, documents[0])
@@ -166,6 +167,7 @@ func (d *Database) Insert(collectionName string, documents []interface{}) error 
 				"Try to insert many documents to '%s' collection",
 				collectionName,
 			),
+			key,
 		)
 
 		_, err := coll.InsertMany(d.Context, documents)
