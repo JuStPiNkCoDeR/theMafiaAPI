@@ -1,7 +1,7 @@
-package tests
+package unit
 
 import (
-	"../utils"
+	"../../utils"
 	"fmt"
 	"testing"
 )

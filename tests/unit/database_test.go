@@ -1,16 +1,18 @@
-package tests
+package unit
 
 import (
-	"../database"
-	"../logger"
+	"../../database"
+	"../../logger"
 	"context"
 	"fmt"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"testing"
 )
 
+const dbURI = "mongodb://test:test@127.0.0.1:2345/test"
+
 var mafiaLogs = &logger.MafiaLogger{IsEnabled: false}
-var testDB = database.Database{Logger: mafiaLogs, Context: context.TODO(), Options: options.Client().ApplyURI("mongodb://localhost:2345")}
+var testDB = database.Database{Logger: mafiaLogs, Context: context.TODO(), Options: options.Client().ApplyURI(dbURI)}
 
 func TestDatabase_Connect(t *testing.T) {
 	err := testDB.Connect()

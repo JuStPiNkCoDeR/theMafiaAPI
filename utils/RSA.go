@@ -132,6 +132,7 @@ func (R *RSA) VerifySign(sign []byte, encrypted []byte) (err error) {
 	return nil
 }
 
+// Import RSA key from PEM string
 func (R *RSA) ImportKey(keyPEM string, isOAEP bool) error {
 	block, _ := pem.Decode([]byte(keyPEM))
 
@@ -162,4 +163,43 @@ func (R *RSA) ImportKey(keyPEM string, isOAEP bool) error {
 			Message: "The input PEM string didnt match rsa public key type",
 		}
 	}
+}
+
+// Export the own public keys as PEM strings
+func (R *RSA) ExportKeys() (pemOAEP string, pemPSS string, err error) {
+	bytesOAEP, err := x509.MarshalPKIXPublicKey(R.OwnPublicKeyOAEP)
+
+	if err != nil {
+		err = lib.Wrap(err, "Error on x509 marshal for OAEP public key")
+		return
+	}
+
+	pemOAEP = string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: bytesOAEP,
+	}))
+
+	if pemOAEP == "" {
+		err = lib.Wrap(nil, "Error on encoding public key(OAEP)")
+		return
+	}
+
+	bytesPSS, err := x509.MarshalPKIXPublicKey(R.OwnPublicKeyPSS)
+
+	if err != nil {
+		err = lib.Wrap(err, "Error on x509 marshal for PSS public key")
+		return
+	}
+
+	pemPSS = string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: bytesPSS,
+	}))
+
+	if pemPSS == "" {
+		err = lib.Wrap(nil, "Error on encoding public key(PSS)")
+		return
+	}
+
+	return
 }

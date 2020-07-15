@@ -36,7 +36,7 @@ func registrationHandler(w http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(w, "Reg url")
 }
 
-func wsSecureHandler(w http.ResponseWriter, r *http.Request) {
+func WsSecureHandler(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrades.Upgrade(w, r, nil)
 
 	if err != nil {
@@ -79,7 +79,7 @@ func main() {
 	fmtLogger.Log(logger.Info, "Connection to the MongoDB established successfully", "Main")
 
 	// Setup sockets
-	router.HandleFunc("/ws/secure", wsSecureHandler)
+	router.HandleFunc("/ws/secure", WsSecureHandler)
 	fmtLogger.Log(logger.Info, "WebSocket server setup successfully", "Main")
 
 	// Setup routes
