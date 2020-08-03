@@ -1,17 +1,27 @@
 version: "3.4"
 
 services:
-  database:
-    image: mongo:4.2.8
-    container_name: mongo
-    command: [--auth]
-    restart: always
+#  database:
+#    image: mongo:4.2.8
+#    container_name: mongo
+#    command: [--auth]
+#    restart: always
+#    ports:
+#      - '2345:27017'
+#    environment:
+#      - MONGO_INITDB_ROOT_PASSWORD=realllyHordPasward
+#      - MONGO_INITDB_ROOT_USERNAME=admin
+#      - MONGO_INITDB_DATABASE=mafia
+#      - MONGO_PORT=27017
+#      - DATABASE_USERNAME=godfather
+#      - DATABASE_PASSWORD=shawUorResPikT
+
+  sockets:
+    image: golang:1.14
+    container_name: socket_service
+    working_dir: /go/src/app
+    command: make
     ports:
-      - '2345:27017'
-    environment:
-      - MONGO_INITDB_ROOT_PASSWORD=realllyHordPasward
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_DATABASE=mafia
-      - MONGO_PORT=27017
-      - DATABASE_USERNAME=godfather
-      - DATABASE_PASSWORD=shawUorResPikT
+    - '3578:80'
+    volumes:
+    - ./services/sockets:/go/src/app

@@ -43,18 +43,18 @@ func convertData(event string, data interface{}) (string, error) {
 }
 
 func TestSignUp(t *testing.T) {
-	// Create test server with the secure socket handler
+	// Create test server with the secure sockets handler
 	server := httptest.NewServer(http.HandlerFunc(main.WsSecureHandler))
 	defer server.Close()
 
-	// Make the socket
+	// Make the sockets
 	ws, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		t.Fatalf("Can't make websocket\n%v", err)
 	}
 	defer func() {
 		if err := ws.Close(); err != nil {
-			t.Fatalf("Error on closing the socket\n%v", err)
+			t.Fatalf("Error on closing the sockets\n%v", err)
 		}
 	}()
 

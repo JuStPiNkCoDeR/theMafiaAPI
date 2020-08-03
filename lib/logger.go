@@ -2,7 +2,7 @@
 // All Rights have been taken by Mafia :)
 
 // Common output stream interface
-package logger
+package lib
 
 import (
 	"fmt"
@@ -52,19 +52,20 @@ var logsMap = map[LogType]LogFunction{
 
 // Root logger interface
 type Logger interface {
-	Log(logType LogType, message string, key string)
+	Log(logType LogType, message string)
 }
 
 // Implementation for current project
 type MafiaLogger struct {
 	IsEnabled bool
+	LogKey    string
 }
 
 // Print message to the current output stream
-func (l *MafiaLogger) Log(logType LogType, message string, key string) {
+func (l *MafiaLogger) Log(logType LogType, message string) {
 	if l.IsEnabled {
 		if logFunc, ok := logsMap[logType]; ok {
-			logFunc(message, key)
+			logFunc(message, l.LogKey)
 		}
 	}
 }

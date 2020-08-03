@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package profiles.proto;
+
+message SignUpRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message SignUpResponse {
+  bool isOK = 1;
+  string description = 2;
+}
+
+service ProfilesService {
+  rpc SignUp(SignUpRequest) returns (SignUpResponse) {}
+}
+
+option go_package = "theMafiaAPI/services/profiles";

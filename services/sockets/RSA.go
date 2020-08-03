@@ -2,13 +2,14 @@
 // All Rights have been taken by Mafia :)
 
 // RSA encryption implementation
-package utils
+package main
 
 import (
-	"../lib"
+	"mafia/sockets/lib"
+
 	"crypto"
 	"crypto/rand"
-	"crypto/rsa"
+	Rsa "crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
@@ -17,30 +18,30 @@ import (
 
 // RSA data struct
 type RSA struct {
-	privateKeyOAEP       *rsa.PrivateKey
-	privateKeyPSS        *rsa.PrivateKey
-	OwnPublicKeyOAEP     *rsa.PublicKey // Public key of server for encryption
-	OwnPublicKeyPSS      *rsa.PublicKey // Public key of server for signature
-	ForeignPublicKeyOAEP *rsa.PublicKey // Public key of other user to encode data
-	ForeignPublicKeyPSS  *rsa.PublicKey // Public key of other user to make signature
+	privateKeyOAEP       *Rsa.PrivateKey
+	privateKeyPSS        *Rsa.PrivateKey
+	OwnPublicKeyOAEP     *Rsa.PublicKey // Public key of server for encryption
+	OwnPublicKeyPSS      *Rsa.PublicKey // Public key of server for signature
+	ForeignPublicKeyOAEP *Rsa.PublicKey // Public key of other user to encode data
+	ForeignPublicKeyPSS  *Rsa.PublicKey // Public key of other user to make signature
 	Hash                 hash.Hash      // Hash code
 	signHash             crypto.Hash
-	signatureOptions     *rsa.PSSOptions
+	signatureOptions     *Rsa.PSSOptions
 }
 
 // Generate private, public keys and sign hash, options for current instance
 func (R *RSA) Init() (err error) {
-	if R.privateKeyOAEP, err = rsa.GenerateKey(rand.Reader, 2048); err != nil {
+	if R.privateKeyOAEP, err = Rsa.GenerateKey(rand.Reader, 2048); err != nil {
 		return lib.Wrap(err, "An error occurred while generating keys(OAEP)")
 	}
 
-	if R.privateKeyPSS, err = rsa.GenerateKey(rand.Reader, 2048); err != nil {
+	if R.privateKeyPSS, err = Rsa.GenerateKey(rand.Reader, 2048); err != nil {
 		return lib.Wrap(err, "An error occurred while generating keys(PSS)")
 	}
 
 	R.OwnPublicKeyOAEP = &R.privateKeyOAEP.PublicKey
 	R.OwnPublicKeyPSS = &R.privateKeyPSS.PublicKey
-	R.signatureOptions = &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto}
+	R.signatureOptions = &Rsa.PSSOptions{SaltLength: Rsa.PSSSaltLengthAuto}
 	R.signHash = crypto.SHA256
 	R.Hash = sha256.New()
 
@@ -53,7 +54,7 @@ func (R *RSA) Encode(message string, label string) (encrypted []byte, err error)
 		return nil, lib.Wrap(nil, "Foreign public key(OAEP) is empty")
 	}
 
-	encrypted, err = rsa.EncryptOAEP(R.Hash, rand.Reader, R.ForeignPublicKeyOAEP, []byte(message), []byte(label))
+	encrypted, err = Rsa.EncryptOAEP(R.Hash, rand.Reader, R.ForeignPublicKeyOAEP, []byte(message), []byte(label))
 
 	if err != nil {
 		return nil, lib.Wrap(err, "An error occurred while encrypting message")
@@ -88,7 +89,7 @@ func (R *RSA) Sign(encrypted []byte) (signature []byte, err error) {
 		return nil, lib.Wrap(err, "Error on making signature")
 	}
 
-	signature, err = rsa.SignPSS(rand.Reader, R.privateKeyPSS, R.signHash, hashed, R.signatureOptions)
+	signature, err = Rsa.SignPSS(rand.Reader, R.privateKeyPSS, R.signHash, hashed, R.signatureOptions)
 
 	if err != nil {
 		return nil, lib.Wrap(err, "Error on making signature")
@@ -100,7 +101,7 @@ func (R *RSA) Sign(encrypted []byte) (signature []byte, err error) {
 // Decode message encoded via algorithm above
 func (R *RSA) Decode(encrypted []byte, label []byte) (message string, err error) {
 	var bytes []byte
-	bytes, err = rsa.DecryptOAEP(R.Hash, rand.Reader, R.privateKeyOAEP, encrypted, label)
+	bytes, err = Rsa.DecryptOAEP(R.Hash, rand.Reader, R.privateKeyOAEP, encrypted, label)
 
 	if err != nil {
 		return "", lib.Wrap(err, "Error on decoding")
@@ -123,7 +124,7 @@ func (R *RSA) VerifySign(sign []byte, encrypted []byte) (err error) {
 		return lib.Wrap(err, "Error on verifying of signature")
 	}
 
-	err = rsa.VerifyPSS(R.ForeignPublicKeyPSS, R.signHash, hashed, sign, R.signatureOptions)
+	err = Rsa.VerifyPSS(R.ForeignPublicKeyPSS, R.signHash, hashed, sign, R.signatureOptions)
 
 	if err != nil {
 		return lib.Wrap(err, "Error on verifying signature")
@@ -145,12 +146,12 @@ func (R *RSA) ImportKey(keyPEM string, isOAEP bool) error {
 	if err != nil {
 		return &lib.StackError{
 			ParentError: err,
-			Message:     "Cannot parse bytes of rsa key",
+			Message:     "Cannot parse bytes of Rsa key",
 		}
 	}
 
 	switch pub := key.(type) {
-	case *rsa.PublicKey:
+	case *Rsa.PublicKey:
 		if isOAEP {
 			R.ForeignPublicKeyOAEP = pub
 		} else {
@@ -160,7 +161,7 @@ func (R *RSA) ImportKey(keyPEM string, isOAEP bool) error {
 		return nil
 	default:
 		return &lib.StackError{
-			Message: "The input PEM string didnt match rsa public key type",
+			Message: "The input PEM string didnt match Rsa public key type",
 		}
 	}
 }

@@ -48,7 +48,7 @@ func WsSecureHandler(w http.ResponseWriter, r *http.Request) {
 	err = secureSocket.Init()
 
 	if err != nil {
-		fmtLogger.Log(logger.Error, fmt.Sprintf("Error on initializing secure socket\nError:\n\t%s", err), "Socket")
+		fmtLogger.Log(logger.Error, fmt.Sprintf("Error on initializing secure sockets\nError:\n\t%s", err), "Socket")
 	}
 
 	secureClients[ws] = secureSocket
