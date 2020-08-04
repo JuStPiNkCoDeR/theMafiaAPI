@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"mafia/sockets/lib"
 	"regexp"
 	"strings"
@@ -37,7 +38,7 @@ Parse & validate input data using giving rules struct.
 Use `socket:"..."` tag to set parse options
 */
 type Parser interface {
-	Parse(input DataObject, rules interface{}) (DataObject, error)
+	Parse(input DataObject, output interface{}) error
 }
 
 // Check the correctness of input type
@@ -47,14 +48,43 @@ func checkType(input interface{}, t reflect.Type) bool {
 	return inType.AssignableTo(t)
 }
 
+// Set value directly to named field
+func setField(output interface{}, name string, value interface{}) error {
+	// Skip nil values
+	if value == nil {
+		return nil
+	}
+
+	structValue := reflect.ValueOf(output).Elem()
+	fieldValue := structValue.FieldByName(name)
+
+	if !fieldValue.IsValid() {
+		return lib.Wrap(nil, fmt.Sprintf("No such field: %s in struct", name))
+	}
+
+	if !fieldValue.CanSet() {
+		return lib.Wrap(nil, fmt.Sprintf("Can't set %s field", name))
+	}
+
+	fieldType := fieldValue.Type()
+	val := reflect.ValueOf(value)
+
+	if fieldType != val.Type() {
+		return lib.Wrap(nil, "Provided value didn't match with struct field type")
+	}
+
+	fieldValue.Set(val)
+	return nil
+}
+
 // Simple socket parser
 type SocketParser struct {
 	rsa *RSA
 }
 
 // Transform & validate input using options
-func (p *SocketParser) lookFor(input DataObject, field reflect.StructField, found bool, option Option) (bool, interface{}, error) {
-	data := input[field.Name]
+func (p *SocketParser) lookFor(input DataObject, inputFieldName string, field reflect.StructField, option Option) (bool, interface{}, error) {
+	data, found := input[inputFieldName]
 
 	switch option {
 	case omitempty:
@@ -112,18 +142,17 @@ func (p *SocketParser) lookFor(input DataObject, field reflect.StructField, foun
 }
 
 // Runs parse logic
-func (p *SocketParser) Parse(input DataObject, rules interface{}) (DataObject, error) {
+func (p *SocketParser) Parse(input DataObject, output interface{}) error {
 	var (
-		val          = reflect.Indirect(reflect.ValueOf(rules))
+		val          = reflect.Indirect(reflect.ValueOf(output))
 		fieldsAmount = val.Type().NumField()
-		output       = make(DataObject)
 	)
 
 	for i := 0; i < fieldsAmount; i++ {
 		field := val.Type().Field(i)
-		data, ok := input[field.Name]
 		// Tag checking
 		if field.Tag == "" {
+			data, ok := input[field.Name]
 			// No tags -> smooth checking
 			if !ok {
 				// No rule & no input -> skip
@@ -132,33 +161,41 @@ func (p *SocketParser) Parse(input DataObject, rules interface{}) (DataObject, e
 			// It appears at input -> check type
 			if checkType(data, field.Type) {
 				// Types assignable -> accept
-				output[field.Name] = data
+				if err := setField(output, field.Name, data); err != nil {
+					return lib.Wrap(err, "Error occurred while setting field value")
+				}
 			}
 		} else {
 			// Tags specified -> hard checking
-			optionString := field.Tag.Get(tagKey)
-			options := strings.Split(optionString, ",")
+			var (
+				temp           interface{}
+				optionString   = field.Tag.Get(tagKey)
+				options        = strings.Split(optionString, ",")
+				inputFieldName = options[0]
+			)
 
-			for _, opt := range options {
-				isCorrect, parsed, err := p.lookFor(input, field, ok, Option(opt))
+			for _, opt := range options[1:] {
+				isCorrect, parsed, err := p.lookFor(input, inputFieldName, field, Option(opt))
 				if err != nil {
-					return nil, lib.Wrap(err, "Error on parsing input object")
+					return lib.Wrap(err, "Error on parsing input object")
 				}
 
 				if !isCorrect {
-					return nil, lib.Wrap(nil, "Incorrect data passed for "+opt+" option")
+					return lib.Wrap(nil, "Incorrect data passed for "+opt+" option")
 				}
 
 				if parsed != nil {
-					input[field.Name] = parsed
+					temp = parsed
+				} else {
+					temp = input[inputFieldName]
 				}
 			}
 
-			if ok {
-				output[field.Name] = input[field.Name]
+			if err := setField(output, field.Name, temp); err != nil {
+				return lib.Wrap(err, "Error occurred while setting field value")
 			}
 		}
 	}
 
-	return output, nil
+	return nil
 }

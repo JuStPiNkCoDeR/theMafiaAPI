@@ -5,17 +5,6 @@ import (
 	"testing"
 )
 
-func compare(a, b DataObject) bool {
-	for key, value := range a {
-		bValue, ok := b[key]
-		if !(ok && bValue == value) {
-			return false
-		}
-	}
-
-	return true
-}
-
 func TestSocketParser_Parse(t *testing.T) {
 	clientRsa := &RSA{}
 	serverRsa := &RSA{}
@@ -36,14 +25,14 @@ func TestSocketParser_Parse(t *testing.T) {
 	parser := &SocketParser{rsa: serverRsa}
 
 	type Request struct {
-		name    string `socket:"require"`
-		surname string `socket:"omitempty"`
-		email   string `socket:"email"`
+		Name    string `socket:"name,require"`
+		Surname string `socket:"surname,omitempty"`
+		Email   string `socket:"email,email"`
 	}
 
 	type RsaRequest struct {
-		name  string `socket:"rsa"`
-		email string `socket:"rsa,email"`
+		Name  string `socket:"name,rsa"`
+		Email string `socket:"email,rsa,email"`
 	}
 
 	tests := []struct {
@@ -107,9 +96,10 @@ func TestSocketParser_Parse(t *testing.T) {
 
 	for _, test := range tests {
 		shouldThrown := test.want == nil
+		output := test.rules
 
 		t.Run(test.name, func(t *testing.T) {
-			parsed, err := parser.Parse(test.input, test.rules)
+			err := parser.Parse(test.input, output)
 			if err != nil && !shouldThrown {
 				t.Fatalf("Unable to parse data:\n%s", err)
 			} else if err == nil && shouldThrown {
@@ -126,12 +116,12 @@ func TestSocketParser_Parse(t *testing.T) {
 					panic(err)
 				}
 
-				parsedJSON, err := json.Marshal(parsed)
+				parsedJSON, err := json.Marshal(output)
 				if err != nil {
 					panic(err)
 				}
 
-				if !(compare(test.want, parsed) && string(wantJSON) == string(parsedJSON)) {
+				if string(wantJSON) == string(parsedJSON) {
 					t.Fatalf("Expected:\n\t%s\nGot:\n\t%s", wantJSON, parsedJSON)
 				}
 			}
