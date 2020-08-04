@@ -17,12 +17,33 @@ func compare(a, b DataObject) bool {
 }
 
 func TestSocketParser_Parse(t *testing.T) {
-	parser := &SocketParser{}
+	clientRsa := &RSA{}
+	serverRsa := &RSA{}
+
+	if err := clientRsa.Init(); err != nil {
+		panic(err)
+	}
+
+	if err := serverRsa.Init(); err != nil {
+		panic(err)
+	}
+
+	serverRsa.ForeignPublicKeyOAEP = clientRsa.OwnPublicKeyOAEP
+	serverRsa.ForeignPublicKeyPSS = clientRsa.OwnPublicKeyPSS
+	clientRsa.ForeignPublicKeyOAEP = serverRsa.OwnPublicKeyOAEP
+	clientRsa.ForeignPublicKeyPSS = serverRsa.OwnPublicKeyPSS
+
+	parser := &SocketParser{rsa: serverRsa}
 
 	type Request struct {
 		name    string `socket:"require"`
 		surname string `socket:"omitempty"`
 		email   string `socket:"email"`
+	}
+
+	type RsaRequest struct {
+		name  string `socket:"rsa"`
+		email string `socket:"rsa,email"`
 	}
 
 	tests := []struct {
@@ -63,6 +84,22 @@ func TestSocketParser_Parse(t *testing.T) {
 			input: DataObject{
 				"name":  "aaa",
 				"email": "aaa",
+			},
+			want: nil,
+		},
+		{
+			name:  "Without name wrong request",
+			rules: &Request{},
+			input: DataObject{
+				"email": "a@a",
+			},
+			want: nil,
+		},
+		{
+			name:  "Without email wrong request",
+			rules: &Request{},
+			input: DataObject{
+				"name": "aaa",
 			},
 			want: nil,
 		},

@@ -105,7 +105,7 @@ func (socket *SecureSocket) handle() {
 			var (
 				incomingMessage    interface{}
 				incomingMessageMap DataObject
-				input              DataObject
+				_                  DataObject
 				eventName          string
 				requestID          string
 			)
@@ -147,7 +147,7 @@ func (socket *SecureSocket) handle() {
 			incomingMessageMap = incomingMessage.(map[string]interface{})
 			eventName = incomingMessageMap["name"].(string)
 			requestID = incomingMessageMap["reqID"].(string)
-			input = incomingMessageMap["data"].(DataObject)
+			_ = incomingMessageMap["data"].(DataObject)
 
 			fmtLogger.LogKey = requestID
 
@@ -157,7 +157,9 @@ func (socket *SecureSocket) handle() {
 				getServerKeys(eventName, socket)
 			// Client sends own RSA public keys
 			case "rsa:setClientKeys":
-				data, err := socket.Parser.Parse(input, &SetClientKeysRequest{})
+				var data interface{}
+
+				//err := socket.Parser.Parse(input, &SetClientKeysRequest{})
 				if err != nil {
 					errorSocketEvent(fmtLogger, eventName, lib.Wrap(err, "Error on parsing input data"), socket.SimpleSocket)
 
@@ -172,7 +174,7 @@ func (socket *SecureSocket) handle() {
 					"parsed":  data,
 				})
 
-				if isAccepted := setClientsKeys(data, eventName, socket); isAccepted {
+				if isAccepted := setClientsKeys(map[string]interface{}{}, eventName, socket); isAccepted {
 					if err := socket.Send(rsaAcceptClientKeys, "YES"); err != nil {
 						errorSocketEvent(fmtLogger, eventName, lib.Wrap(err, "Error on sending message"), socket.SimpleSocket)
 					}
@@ -184,16 +186,16 @@ func (socket *SecureSocket) handle() {
 			// Client signing up
 			case "rsa:signUp":
 				// gRPC request to profile service
-				data, err := socket.Parser.Parse(input, &SignUpRequest{})
+				//data, err := socket.Parser.Parse(input, &SignUpRequest{})
 				if err != nil {
 					errorSocketEvent(fmtLogger, eventName, lib.Wrap(err, "Error on parsing input data"), socket.SimpleSocket)
 				}
 
-				debugSocketEvent(fmtLogger, map[string]interface{}{
-					"event":   eventName,
-					"message": "Parsed data object",
-					"parsed":  data,
-				})
+				// debugSocketEvent(fmtLogger, map[string]interface{}{
+				//	"event":   eventName,
+				//	"message": "Parsed data object",
+				//	"parsed":  data,
+				//})
 			}
 		}
 	}()
