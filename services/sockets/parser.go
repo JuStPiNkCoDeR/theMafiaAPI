@@ -171,6 +171,7 @@ func (p *SocketParser) Parse(input DataObject, output interface{}) error {
 				temp           interface{}
 				optionString   = field.Tag.Get(tagKey)
 				options        = strings.Split(optionString, ",")
+				// First option should be input object field name
 				inputFieldName = options[0]
 			)
 
